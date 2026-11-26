@@ -237,6 +237,7 @@
     if (imgs > 0) choices.push(['imgwm', '그림에 워터마크']);
     if (imgs > 0) choices.push(['trim', '여백 자르기']);
     if (imgs > 0) choices.push(['scan', '스캔처럼 보정']);
+    if (imgs > 0) choices.push(['crop', '반듯하게 자르기']);
     if (items.length > 0) choices.push(['zip', 'ZIP으로 묶기']);
     if (items.length > 1) choices.push(['rename', '이름 한꺼번에 바꾸기']);
     if (items.length > 0 && items.every(isZip)) choices.push(['unzip', '압축 풀기']);
@@ -244,7 +245,7 @@
     const GROUPS = [
       ['PDF 만들기', ['pdf', 'pdfall', 'arrange', 'merge']],
       ['PDF 손질', ['pages', 'extract', 'split', 'pagenum', 'wm', 'nup', 'fita4', 'squeeze']],
-      ['바꾸기', ['pdfjpg', 'pdftxt', 'tojpg', 'topng', 'shrink', 'scan', 'trim', 'imgwm']],
+      ['바꾸기', ['pdfjpg', 'pdftxt', 'tojpg', 'topng', 'shrink', 'scan', 'crop', 'trim', 'imgwm']],
       ['파일', ['unzip', 'zip', 'rename']],
     ];
     const byId = new Map(choices);
@@ -428,6 +429,39 @@
   });
 
   $('#clear').addEventListener('click', () => { closeEditor(); items = []; clearResults(); render(); });
+
+  // ── 반듯하게 자르기 (문서 사진의 네 귀퉁이를 잡아 편다) ──
+  async function openCrop() {
+    if (busy || editor) return;
+    closeOptions();
+    clearResults();
+    actionsEl.hidden = true;
+    try {
+      const ed = await window.TukCrop.open(items.filter(isImg).map((x) => x.file), pagesEl, {
+        decode,
+        status: setStatus,
+        made: async (blob, file, scan) => {
+          let out = blob;
+          if (scan) {
+            setStatus('스캔처럼 보정하는 중… ' + file.name);
+            out = await scanImage(new File([blob], 'x.jpg', { type: 'image/jpeg' }), scanMode === 1);
+          }
+          addResult(stem(file.name) + (scan ? '_반듯_스캔.jpg' : '_반듯.jpg'), out, size(out.size));
+          resultBar.hidden = false;
+          $('#zipAll').hidden = results.length < 2;
+        },
+        finished: (n) => setStatus(n ? '다 됐어요. ' + n + '개를 만들었어요.' + (n > 1 ? ' \'이 결과로 이어서 하기\'를 누르면 PDF 하나로 묶을 수 있어요.' : '') : '만든 파일이 없어요.'),
+        closed: () => { editor = null; actionsEl.hidden = false; },
+      });
+      // 열 수 있는 사진이 하나도 없으면 여는 중에 이미 닫혔다
+      editor = pagesEl.hidden ? null : ed;
+    } catch (e) {
+      editor = null;
+      actionsEl.hidden = false;
+      pagesEl.hidden = true; pagesEl.innerHTML = '';
+      setStatus(why(e), true);
+    }
+  }
 
   // ── PDF 쪽 고르기 ──
   async function openEditor(photos) {
@@ -667,6 +701,7 @@
     if (FORMS[id]) return showOptions(id);
     if (id === 'pages') return openEditor(false);
     if (id === 'arrange') return openEditor(true);
+    if (id === 'crop') return openCrop();
     if (busy) return;
     busy = true;
     clearResults();

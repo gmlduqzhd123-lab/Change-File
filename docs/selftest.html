@@ -184,6 +184,41 @@ a { color: inherit; }
       need(darkest < 60, '글씨가 진하지 않아요 (' + darkest + ')');
       return '바탕 ' + light + '·' + dark + ' (255가 흰색) · 글씨 ' + darkest;
     }],
+    ['반듯하게 자르기', async () => {
+      // 어두운 책상 위에 비스듬히 놓인 흰 종이. 네 귀퉁이 안쪽에 색 점을 찍어 둔다.
+      const c = document.createElement('canvas'); c.width = 1200; c.height = 900;
+      const g = c.getContext('2d');
+      g.fillStyle = '#3a3a3a'; g.fillRect(0, 0, 1200, 900);
+      const q = [[260, 120], [1040, 200], [1100, 800], [140, 720]];
+      g.fillStyle = '#ffffff'; g.beginPath(); q.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.fill();
+      const photo = await new Promise((res) => c.toBlob((b) => res(new File([b], '비스듬.png', { type: 'image/png' })), 'image/png'));
+      await setFiles([photo]); click('반듯하게 자르기');
+      for (let i = 0; i < 100 && !(doc.querySelector('#pages .crop-pt') && /네 귀퉁이를 맞추고/.test(status())); i++) await sleep(100);
+      need(doc.querySelectorAll('#pages .crop-pt').length === 4, '편집 화면이 열리지 않았어요');
+      // 손잡이를 끌어 본다 (첫 모서리를 종이 귀퉁이로)
+      const stage = doc.querySelector('#pages .crop-stage canvas').getBoundingClientRect();
+      const hd = doc.querySelectorAll('#pages .crop-pt');
+      const drag = (el, x, y) => {
+        const r = el.getBoundingClientRect(), o = { bubbles: true, pointerId: 7, pointerType: 'mouse', isPrimary: true };
+        el.setPointerCapture = () => {};
+        el.dispatchEvent(new win.PointerEvent('pointerdown', Object.assign({ clientX: r.left + 5, clientY: r.top + 5 }, o)));
+        el.dispatchEvent(new win.PointerEvent('pointermove', Object.assign({ clientX: x, clientY: y }, o)));
+        el.dispatchEvent(new win.PointerEvent('pointerup', Object.assign({ clientX: x, clientY: y }, o)));
+      };
+      q.forEach(([x, y], i) => drag(hd[i], stage.left + stage.width * x / 1200, stage.top + stage.height * y / 900));
+      const cb = doc.querySelector('#pages input[name=scan]'); if (cb.checked) cb.click();
+      [...doc.querySelectorAll('#pages button')].find((b) => b.textContent === '이대로 자르기').click();
+      for (let i = 0; i < 100 && results().length === 0; i++) await sleep(150);
+      const r = results(); need(r.length === 1 && starts(await bytes(r[0]), JPG), status());
+      const bmp = await createImageBitmap(await (await fetch(r[0].url)).blob());
+      const o = document.createElement('canvas'); o.width = bmp.width; o.height = bmp.height;
+      const og = o.getContext('2d'); og.drawImage(bmp, 0, 0);
+      const lum = (x, y) => og.getImageData(Math.round(x), Math.round(y), 1, 1).data[0];
+      const m = 12, corners = [lum(m, m), lum(bmp.width - m, m), lum(bmp.width - m, bmp.height - m), lum(m, bmp.height - m)];
+      need(corners.every((v) => v > 230), '귀퉁이가 종이(흰색)가 아니에요: ' + corners.join(', '));
+      need(Math.abs(bmp.width - 960) < 40 && Math.abs(bmp.height - 610) < 40, '크기가 이상해요: ' + bmp.width + '×' + bmp.height);
+      return bmp.width + '×' + bmp.height + ' · 네 귀퉁이 밝기 ' + corners.join('·');
+    }],
     ['여백 자르기', async () => {
       await setFiles([await picture('캡처.png', 900, 700, '#3C8CE8')]);
       click('여백 자르기'); await done();
