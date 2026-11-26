@@ -1,0 +1,27 @@
+{
+  "name": "툭 — 파일을 툭 놓으면 끝",
+  "short_name": "툭",
+  "description": "PDF 만들기·합치기·쪽 고르기, 그림 용량 줄이기, ZIP 묶기·풀기. 파일은 내 기기 안에서만.",
+  "lang": "ko",
+  "id": "./",
+  "start_url": "./#web",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F6F3EE",
+  "theme_color": "#F6F3EE",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "share_target": {
+    "action": "share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        { "name": "files", "accept": ["image/*", "application/pdf", ".pdf", "application/zip", ".zip", ".heic", ".heif"] }
+      ]
+    }
+  }
+}

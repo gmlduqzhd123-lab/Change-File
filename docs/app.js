@@ -593,8 +593,60 @@
     })
     .catch(() => {});
 
+  // ── 앱으로 설치 · 인터넷 없이 쓰기 ──
+  // 서비스 워커는 툭 화면과 라이브러리만 담아 둔다. 파일은 담지 않는다.
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+  const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  const installBtn = $('#installBtn');
+  let installEvent = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installEvent = e;
+    installBtn.hidden = false;
+  });
+  installBtn.addEventListener('click', async () => {
+    if (!installEvent) return;
+    const e = installEvent; installEvent = null;
+    installBtn.hidden = true;
+    try { await e.prompt(); } catch (_) { /* 무시 */ }
+  });
+  window.addEventListener('appinstalled', () => { installBtn.hidden = true; installEvent = null; });
+  if (!standalone && /iphone|ipad|ipod/i.test(navigator.userAgent) && !/crios|fxios|edgios/i.test(navigator.userAgent)) $('#iosHint').hidden = false;
+
+  // ── 다른 앱에서 공유로 받은 파일 (안드로이드에 설치했을 때) ──
+  async function takeShared() {
+    if (!/[?&]shared=1/.test(location.search)) return;
+    history.replaceState(null, '', location.pathname + '#web');
+    if (!window.caches) return;
+    try {
+      const box = await caches.open('tuk-share');
+      const keys = await box.keys();
+      const list = [];
+      for (const k of keys) {
+        const r = await box.match(k);
+        if (!r) continue;
+        const name = decodeURIComponent(r.headers.get('X-Tuk-Name') || '받은파일');
+        const blob = await r.blob();
+        const file = new File([blob], name, { type: blob.type, lastModified: Number(r.headers.get('X-Tuk-Time')) || Date.now() });
+        list.push({ file, path: name });
+      }
+      await caches.delete('tuk-share');
+      if (!list.length) { setStatus('공유한 파일을 받지 못했어요. 여기에 다시 놓아 주세요.', true); return; }
+      list.sort((a, b) => a.path.localeCompare(b.path, 'ko', { numeric: true }));
+      setItems(list);
+      setStatus(list.length + '개를 받았어요. 아래에서 할 일을 고르세요.');
+      const web = document.getElementById('web');
+      if (web) web.scrollIntoView();
+    } catch (_) {
+      setStatus('공유한 파일을 받지 못했어요. 여기에 다시 놓아 주세요.', true);
+    }
+  }
+
   if (typeof JSZip === 'undefined') {
     setStatus('ZIP 기능을 불러오지 못했어요. 인터넷 연결을 확인하고 새로 고쳐 주세요. (PDF·용량 줄이기는 돼요)', true);
   }
   render();
+  takeShared();
 })();
