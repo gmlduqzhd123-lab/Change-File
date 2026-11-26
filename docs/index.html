@@ -91,6 +91,9 @@ section .lead { color: var(--muted); margin: 0 0 24px; }
 .files li .kind { flex: none; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 6px; background: var(--sheet); color: var(--muted); }
 .files li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files li .sz { flex: none; color: var(--muted); }
+.files li .rm, .listbar button { flex: none; min-height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--sheet); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.listbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.listbar button { min-height: 38px; font-weight: 700; }
 .actions { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
 .act-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .act-label { flex: 0 0 100%; font-size: 13px; font-weight: 700; color: var(--muted); }
@@ -161,7 +164,11 @@ section .lead { color: var(--muted); margin: 0 0 24px; }
 .results li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
 .results li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .results li .note { color: var(--muted); flex: none; }
-.results li a { flex: none; font-weight: 700; color: var(--accent); text-decoration: none; }
+.results li a { flex: none; font-weight: 700; color: var(--accent); text-decoration: none; padding: 6px 2px; }
+.results li a.see { color: var(--muted); font-weight: 400; text-decoration: underline; }
+.results li .pv { flex: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: var(--sheet2); color: var(--muted); font-size: 10px; font-weight: 800; overflow: hidden; }
+.results li .pv img, .results li .pv canvas { max-width: 100%; max-height: 100%; display: block; }
+@media (max-width: 560px) { .results li { flex-wrap: wrap; } .results li .nm { flex-basis: calc(100% - 60px); } .results li .note { margin-left: 54px; flex: 1; } }
 .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 
 /* 비교·기능 */
@@ -236,6 +243,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
         <input type="file" id="camera" accept="image/*" capture="environment" class="sr" tabindex="-1">
         <div class="more" id="more" hidden><button class="btn small" id="camBtn" type="button">카메라로 찍기</button><span>찍을 때마다 아래 목록에 더해져요</span></div>
         <ul class="files" id="files"></ul>
+        <div class="listbar" id="listBar" hidden><button id="addBtn" type="button">+ 파일 더하기</button><button id="clearList" type="button">모두 지우기</button></div>
         <div class="actions" id="actions"></div>
         <p class="hint" id="hint" hidden></p>
         <div class="pages" id="pages" hidden></div>
@@ -244,6 +252,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
         <ul class="results" id="results"></ul>
         <div class="bar" id="resultBar" hidden>
           <button class="btn small primary" id="shareAll" type="button" hidden>공유하기</button>
+          <button class="btn small" id="useResults" type="button">이 결과로 이어서 하기</button>
           <button class="btn small" id="zipAll" type="button">결과를 ZIP 하나로 받기</button>
           <button class="btn small" id="clear" type="button">처음부터</button>
         </div>

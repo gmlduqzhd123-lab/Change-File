@@ -63,10 +63,17 @@
   // ── 파일 받기 ──
   drop.addEventListener('click', () => picker.click());
   drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); } });
+  let adding = false;   // '파일 더하기'로 연 고르기 창이면 지금 목록 뒤에 더한다
   picker.addEventListener('change', () => {
-    setItems([...picker.files].map((f) => ({ file: f, path: f.name })));
+    const list = [...picker.files].map((f) => ({ file: f, path: f.name }));
     picker.value = '';
+    const add = adding; adding = false;
+    if (!list.length) return;
+    setItems(add ? items.concat(list) : list);
+    if (add) setStatus(list.length + '개를 더했어요. 모두 ' + items.length + '개예요.');
   });
+  $('#addBtn').addEventListener('click', () => { if (busy) return; adding = true; picker.click(); });
+  $('#clearList').addEventListener('click', () => { if (!busy) setItems([]); });
   ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'dragend'].forEach((t) => drop.addEventListener(t, () => drop.classList.remove('over')));
   drop.addEventListener('drop', async (e) => {
@@ -154,12 +161,16 @@
     const shown = items.slice(0, 8);
     for (const it of shown) {
       const li = document.createElement('li');
-      li.innerHTML = '<span class="kind"></span><span class="nm"></span><span class="sz"></span>';
+      li.innerHTML = '<span class="kind"></span><span class="nm"></span><span class="sz"></span><button type="button" class="rm">빼기</button>';
       li.querySelector('.kind').textContent = (ext(it.file.name) || '파일').toUpperCase();
       li.querySelector('.nm').textContent = it.path;
       li.querySelector('.sz').textContent = size(it.file.size);
+      const rm = li.querySelector('.rm');
+      rm.setAttribute('aria-label', it.file.name + ' 빼기');
+      rm.addEventListener('click', () => { if (!busy) setItems(items.filter((x) => x !== it)); });
       filesEl.appendChild(li);
     }
+    $('#listBar').hidden = items.length === 0;
     if (items.length > shown.length) {
       const li = document.createElement('li');
       li.textContent = '그 밖에 ' + (items.length - shown.length) + '개';
@@ -270,6 +281,7 @@
   function clearResults() {
     for (const r of results) if (r.url) URL.revokeObjectURL(r.url);
     results = [];
+    pdfThumbs = 0;
     resultsEl.innerHTML = '';
     resultBar.hidden = true;
     shareBtn.hidden = true;
@@ -280,16 +292,52 @@
     const r = { name, blob, note, url: URL.createObjectURL(blob) };
     results.push(r);
     const li = document.createElement('li');
-    li.innerHTML = '<span class="nm"></span><span class="note"></span><a>받기</a>';
+    li.innerHTML = '<span class="pv" aria-hidden="true"></span><span class="nm"></span><span class="note"></span><a class="see" target="_blank" rel="noopener" hidden>보기</a><a class="get">받기</a>';
     li.querySelector('.nm').textContent = name;
     li.querySelector('.note').textContent = note || size(blob.size);
-    const a = li.querySelector('a');
+    preview(li, r);
+    const a = li.querySelector('a.get');
     a.href = r.url;
     a.download = name.split('/').pop();
     a.setAttribute('aria-label', name.split('/').pop() + ' 받기');
     resultsEl.appendChild(li);
     updateShare();
   }
+
+  // ── 결과 미리보기: 받기 전에 작은 그림과 '보기'(새 탭) ──
+  let pdfThumbs = 0;
+  function preview(li, r) {
+    const e = ext(r.name);
+    const box = li.querySelector('.pv');
+    const see = li.querySelector('.see');
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'pdf', 'txt'].includes(e)) {
+      see.hidden = false;
+      see.href = r.url;
+      see.setAttribute('aria-label', r.name.split('/').pop() + ' 새 탭에서 보기');
+    }
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(e) && results.length <= 40) {
+      const img = new Image();
+      img.loading = 'lazy'; img.decoding = 'async'; img.alt = '';
+      img.src = r.url;
+      box.appendChild(img);
+    } else if (e === 'pdf' && pdfThumbs < 8 && window.TukPdf && window.TukPdf.thumb) {
+      // 첫 쪽만 작게. 못 그려도 조용히 넘어간다 (받기에는 지장 없음)
+      pdfThumbs++;
+      window.TukPdf.thumb(r.blob, 96).then((c) => { if (c && li.isConnected) box.appendChild(c); }).catch(() => {});
+    } else box.textContent = (e || '파일').slice(0, 4).toUpperCase();
+  }
+
+  // ── 결과로 이어서 하기: 받았다가 다시 올리지 않고 바로 다음 일을 ──
+  $('#useResults').addEventListener('click', () => {
+    if (busy || results.length === 0) return;
+    const list = results.map((r) => {
+      const nm = r.name.split('/').pop();
+      return { file: new File([r.blob], nm, { type: r.blob.type || '', lastModified: Date.now() }), path: r.name };
+    });
+    setItems(list);
+    setStatus('결과 ' + list.length + '개를 다시 올렸어요. 이어서 할 일을 고르세요.');
+    drop.scrollIntoView({ block: 'nearest' });
+  });
 
   // ── 공유하기 (휴대폰의 공유 창: 카카오톡·메일 등) ──
   // 파일은 이 기기 안에서 공유 창으로만 넘어가고, 툭은 어디로도 보내지 않는다.
@@ -323,7 +371,7 @@
         images: photos ? (list) => imagesToPdf(list, (i) => setStatus('PDF 만드는 중… ' + (i + 1) + '/' + list.length), pdfPer) : undefined,
         done: (blob, name, note) => {
           for (const r of results) if (r.url) URL.revokeObjectURL(r.url);
-          results = []; resultsEl.innerHTML = '';
+          results = []; resultsEl.innerHTML = ''; pdfThumbs = 0;
           shareBtn.hidden = true;
           addResult(name, blob, note + ' · ' + size(blob.size));
           setStatus('다 됐어요. 받기를 누르세요. 더 고쳐서 다시 만들 수도 있어요.');

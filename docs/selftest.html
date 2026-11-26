@@ -83,7 +83,7 @@ a { color: inherit; }
     throw new Error('시간이 너무 오래 걸려요 (마지막 상태: ' + status() + ')');
   }
   const results = () => [...doc.querySelectorAll('#results li')].map((li) => ({
-    name: li.querySelector('.nm').textContent, note: li.querySelector('.note').textContent, url: li.querySelector('a').href,
+    name: li.querySelector('.nm').textContent, note: li.querySelector('.note').textContent, url: (li.querySelector('a.get') || li.querySelector('a')).href,
   }));
   const bytes = async (r) => new Uint8Array(await (await fetch(r.url)).arrayBuffer());
   const asFile = async (r, type) => new File([await bytes(r)], r.name, { type });
@@ -241,6 +241,17 @@ a { color: inherit; }
       click('압축 풀기'); await done();
       r = results(); need(r.length === 2, '2개가 아니에요: ' + r.length);
       return r.map((x) => x.name.split('/').pop()).join(', ');
+    }],
+    ['파일 더하기·빼기 · 결과로 이어서 하기', async () => {
+      await setFiles([await picture('가.jpg', 300, 200, '#E86E3C'), await picture('나.jpg', 300, 200, '#3C8CE8')]);
+      doc.querySelector('#files .rm').click(); await sleep(100);
+      need(doc.querySelectorAll('#files .rm').length === 1, '빼기가 안 돼요');
+      click('PDF로'); await done();
+      need(results().length === 1 && doc.querySelector('#results .see') && !doc.querySelector('#results .see').hidden, '보기 링크가 없어요');
+      doc.querySelector('#useResults').click(); await sleep(150);
+      need(doc.querySelector('#files .nm').textContent === '나.pdf', '결과가 다시 올라오지 않았어요');
+      need(buttons().some((b) => b.textContent.startsWith('쪽 번호 넣기')), 'PDF 단추가 없어요');
+      return '빼기 → PDF → 이어서 하기 (' + doc.querySelector('#files .nm').textContent + ')';
     }],
     ['이름 한꺼번에 바꾸기', async () => {
       await setFiles([new File(['a'], '나.txt'), new File(['b'], '가.txt'), new File(['c'], '다.txt')]);

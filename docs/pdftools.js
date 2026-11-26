@@ -139,6 +139,24 @@
     return out;
   }
 
+  /** PDF 첫 쪽을 작은 그림(canvas)으로. side: 긴 쪽 픽셀 */
+  async function thumb(blob, side) {
+    await needPdfJs();
+    const view = await window.pdfjsLib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false }).promise;
+    try {
+      const page = await view.getPage(1);
+      const vp1 = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: side * (window.devicePixelRatio || 1) / Math.max(vp1.width, vp1.height) });
+      const c = document.createElement('canvas');
+      c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: g, viewport: vp }).promise;
+      page.cleanup();
+      return c;
+    } finally { view.destroy(); }
+  }
+
   /**
    * PDF 글자 뽑기 → TXT (메모장·한글에서 바로 열리게 UTF-8 BOM). 글자가 없는 스캔본은 {message}.
    */
@@ -706,5 +724,5 @@
     return out;
   }
 
-  window.TukPdf = { merge, edit, split, toJpg, toText, pageNumbers, watermark, squeeze, nup, extract, fitA4, parseRange };
+  window.TukPdf = { thumb, merge, edit, split, toJpg, toText, pageNumbers, watermark, squeeze, nup, extract, fitA4, parseRange };
 })();
