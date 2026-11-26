@@ -1,9 +1,9 @@
 {
-    "version":  "2.0.0",
+    "version":  "2.1.0",
     "url":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.exe",
-    "sha256":  "898fb048433f261c3bc3fdd8c11d170f6315c1381f4e79684733e90bcbd48488",
-    "notes":  "보내기 → 툭 → \u0027PDF 손질\u0027을 누르면 툭 웹 창이 열리고 고른 파일이 바로 올라가요. 합치기·쪽 고르기·쪽 번호·워터마크 등 웹의 PDF 기능을 윈도우에서 바로 써요. 파일은 이 PC 밖으로 나가지 않아요.",
+    "sha256":  "8494336aa6070100e2dd9c8b8678e2efe6bef848e4e67e15baa398f66f86bd2c",
+    "notes":  "PDF 손질 웹 창에서 \u0027원본 폴더에 저장\u0027을 누르면 결과가 원본 옆에 생겨요(다운로드 폴더로 가지 않아요). 그림만 골랐을 때도 \u0027웹 창에서 더 하기\u0027로 워터마크·여백 자르기를 바로 써요.",
     "zip":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.zip",
-    "zipBytes":  35366,
+    "zipBytes":  36537,
     "date":  "2026-11-27"
 }

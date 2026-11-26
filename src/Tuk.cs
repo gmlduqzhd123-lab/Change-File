@@ -26,7 +26,7 @@ namespace Tuk
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "2.0.0";
+        public const string Version = "2.1.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -292,7 +292,8 @@ namespace Tuk
             if (img > 0) list.Add(new MenuChoice("rotate", "그림 돌리기", "돌린 그림을 새 파일로 · 원본은 그대로"));
             int pdfs = files.Count(Kinds.IsPdfFile);
             if (pdfs > 0) list.Add(new MenuChoice("pdfjpg", "PDF → JPG 그림", "쪽마다 JPG 한 장 · 여러 쪽이면 새 폴더에"));
-            if (pdfs > 0) list.Add(new MenuChoice("pdfweb", "PDF 손질 (합치기·쪽 고르기·쪽 번호 등)", "툭 웹 창이 열리고 고른 파일이 바로 올라가요 · 파일은 이 PC 밖으로 나가지 않아요"));
+            if (pdfs > 0) list.Add(new MenuChoice("pdfweb", "PDF 손질 (합치기·쪽 고르기·쪽 번호 등)", "툭 웹 창이 열리고 고른 파일이 바로 올라가요 · 결과는 원본 옆에 저장할 수 있어요"));
+            else if (img > 0) list.Add(new MenuChoice("pdfweb", "웹 창에서 더 하기 (워터마크·여백 자르기 등)", "툭 웹 창이 열리고 고른 그림이 바로 올라가요 · 결과는 원본 옆에 저장할 수 있어요"));
             list.Add(new MenuChoice("zip", "ZIP으로 묶기", "고른 것을 압축 파일 하나로"));
             if (files.All(Kinds.IsZip)) list.Add(new MenuChoice("unzip", "압축 풀기", "새 폴더에 풀기"));
             return list;
@@ -1486,7 +1487,8 @@ namespace Tuk
         static void Serve(TcpListener l, int port, string token, List<string> files, string origin, Action notTaken)
         {
             var start = DateTime.UtcNow; var last = start;
-            bool listed = false; var served = new HashSet<int>();
+            bool listed = false, alive = false; var served = new HashSet<int>();
+            var saved = new List<string>();
             try
             {
                 while (true)
@@ -1495,8 +1497,11 @@ namespace Tuk
                     {
                         var now = DateTime.UtcNow;
                         if (!listed && (now - start).TotalSeconds > 40) { if (notTaken != null) notTaken(); break; }   // 웹 창이 받아 가지 않았다
-                        if (listed && served.Count >= files.Count && (now - last).TotalSeconds > 2) break;             // 다 넘겼다
+                        // 웹 창이 살아 있다고 알리는 동안(10초마다)은 결과를 돌려받으려고 기다린다. 창을 닫으면 45초 뒤 끝낸다.
+                        if (listed && alive && (now - last).TotalSeconds > 45) break;
+                        if (listed && !alive && served.Count >= files.Count && (now - last).TotalSeconds > 8) break;   // 예전 웹 버전: 다 넘기면 끝
                         if (listed && (now - last).TotalSeconds > 120) break;
+                        if ((now - start).TotalHours > 6) break;
                         Thread.Sleep(25);
                         continue;
                     }
@@ -1504,9 +1509,9 @@ namespace Tuk
                     {
                         try
                         {
-                            c.ReceiveTimeout = 5000; c.SendTimeout = 60000;
-                            int what = Handle(c.GetStream(), port, token, files, origin);
-                            if (what == -1) listed = true; else if (what >= 0) served.Add(what);
+                            c.ReceiveTimeout = 15000; c.SendTimeout = 60000;
+                            int what = Handle(c.GetStream(), port, token, files, origin, saved);
+                            if (what == -1) listed = true; else if (what >= 0) served.Add(what); else if (what == -3) alive = true;
                             if (what != -2) last = DateTime.UtcNow;
                         }
                         catch { }
@@ -1517,37 +1522,88 @@ namespace Tuk
             finally { try { l.Stop(); } catch { } }
         }
 
-        /// 돌려주는 값: -1 목록을 줬다 · 0 이상 그 번호의 파일을 줬다 · -2 그 밖
-        static int Handle(NetworkStream ns, int port, string token, List<string> files, string origin)
+        /// 돌려주는 값: -1 목록을 줬다 · 0 이상 그 번호의 파일을 줬다 · -3 살아 있음 알림·저장 · -2 그 밖
+        static int Handle(NetworkStream ns, int port, string token, List<string> files, string origin, List<string> saved)
         {
-            // 요청 머리말 읽기 (16KB까지)
-            var buf = new byte[16384]; int n = 0;
-            while (n < buf.Length)
+            // 요청 머리말 읽기 (16KB까지). 머리말 뒤에 딸려 온 본문 앞부분은 따로 둔다.
+            var buf = new byte[16384]; int n = 0, end = -1;
+            while (n < buf.Length && end < 0)
             {
                 int r = ns.Read(buf, n, buf.Length - n);
                 if (r <= 0) break;
                 n += r;
-                if (n >= 4 && Encoding.ASCII.GetString(buf, 0, n).Contains("\r\n\r\n")) break;
+                for (int i = 3; i < n; i++) if (buf[i - 3] == 13 && buf[i - 2] == 10 && buf[i - 1] == 13 && buf[i] == 10) { end = i + 1; break; }
             }
-            var lines = Encoding.ASCII.GetString(buf, 0, n).Split(new[] { "\r\n" }, StringSplitOptions.None);
+            if (end < 0) return -2;
+            var lines = Encoding.ASCII.GetString(buf, 0, end).Split(new[] { "\r\n" }, StringSplitOptions.None);
             var first = lines[0].Split(' ');
             if (first.Length < 2) return -2;
-            string method = first[0], path = first[1], host = null, from = null;
+            string method = first[0], path = first[1], host = null, from = null; long length = 0;
             foreach (var h in lines.Skip(1))
             {
                 int i = h.IndexOf(':'); if (i <= 0) continue;
                 var k = h.Substring(0, i).Trim().ToLowerInvariant(); var v = h.Substring(i + 1).Trim();
                 if (k == "host") host = v; else if (k == "origin") from = v;
+                else if (k == "content-length") long.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out length);
             }
-            string cors = "Access-Control-Allow-Origin: " + origin + "\r\nVary: Origin\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\n" +
+            string cors = "Access-Control-Allow-Origin: " + origin + "\r\nVary: Origin\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
                           "Access-Control-Allow-Headers: *\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 600\r\n" +
                           "Cache-Control: no-store\r\nConnection: close\r\n";
             // 이 PC의 이 주소로 온 요청, 툭 사이트에서 온 요청, 암호가 맞는 요청에만 답한다
             bool ok = host == "127.0.0.1:" + port && (from == null || from == origin) && path.StartsWith("/" + token + "/", StringComparison.Ordinal);
             if (!ok) { Send(ns, "403 Forbidden", cors, null); return -2; }
             if (method == "OPTIONS") { Send(ns, "204 No Content", cors, null); return -2; }
-            if (method != "GET") { Send(ns, "405 Method Not Allowed", cors, null); return -2; }
             string rest = path.Substring(token.Length + 2);
+            string query = "";
+            int q = rest.IndexOf('?');
+            if (q >= 0) { query = rest.Substring(q + 1); rest = rest.Substring(0, q); }
+
+            if (method == "POST" && rest == "save")
+            {
+                // 웹 창이 만든 결과를 원본 옆에 저장한다. 이름은 파일 이름만 받고(폴더 경로는 버림), 겹치면 (2)를 붙인다.
+                string name = Clean(Arg(query, "name"));
+                if (name == null || length <= 0 || length > 4L * 1024 * 1024 * 1024 || files.Count == 0) { Send(ns, "400 Bad Request", cors, null); return -2; }
+                string dir = Path.GetDirectoryName(Path.GetFullPath(files[0]));
+                string target = Paths.Unique(dir, Path.GetFileNameWithoutExtension(name), Path.GetExtension(name));
+                string tmp = target + ".part";
+                try
+                {
+                    using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write))
+                    {
+                        long got = n - end;
+                        if (got > 0) fs.Write(buf, end, (int)Math.Min(got, length));
+                        var chunk = new byte[81920];
+                        while (got < length)
+                        {
+                            int r = ns.Read(chunk, 0, (int)Math.Min(chunk.Length, length - got));
+                            if (r <= 0) throw new IOException("끊겼어요");
+                            fs.Write(chunk, 0, r); got += r;
+                        }
+                    }
+                    File.Move(tmp, target);
+                }
+                catch (Exception ex)
+                {
+                    try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                    Send(ns, "500 Internal Server Error", cors + "Content-Type: application/json; charset=utf-8\r\n",
+                         Encoding.UTF8.GetBytes("{\"error\":\"" + Json(Jobs.Friendly(ex)) + "\"}"));
+                    return -3;
+                }
+                saved.Add(target);
+                Send(ns, "200 OK", cors + "Content-Type: application/json; charset=utf-8\r\n",
+                     Encoding.UTF8.GetBytes("{\"name\":\"" + Json(Path.GetFileName(target)) + "\",\"folder\":\"" + Json(Path.GetFileName(dir)) + "\"}"));
+                return -3;
+            }
+            if (method != "GET") { Send(ns, "405 Method Not Allowed", cors, null); return -2; }
+            if (rest == "ping") { Send(ns, "200 OK", cors + "Content-Type: application/json\r\n", Encoding.ASCII.GetBytes("{\"save\":true}")); return -3; }
+            if (rest == "reveal")
+            {
+                // 방금 저장한 파일이 있는 폴더를 연다 (이번에 저장한 파일만)
+                var shown = saved.LastOrDefault(File.Exists);
+                if (shown != null) { try { Process.Start("explorer.exe", "/select,\"" + shown + "\""); } catch { } }
+                Send(ns, "204 No Content", cors, null);
+                return -3;
+            }
             if (rest == "list")
             {
                 var sb = new StringBuilder("[");
@@ -1576,6 +1632,28 @@ namespace Tuk
             }
             Send(ns, "404 Not Found", cors, null);
             return -2;
+        }
+
+        static string Arg(string query, string key)
+        {
+            foreach (var part in query.Split('&'))
+            {
+                int i = part.IndexOf('=');
+                if (i > 0 && part.Substring(0, i) == key) { try { return Uri.UnescapeDataString(part.Substring(i + 1).Replace('+', ' ')); } catch { return null; } }
+            }
+            return null;
+        }
+
+        /// 받은 이름에서 파일 이름만 남기고, 윈도우에서 못 쓰는 글자를 뺀다
+        static string Clean(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            int cut = Math.Max(name.LastIndexOf('/'), name.LastIndexOf('\\'));
+            if (cut >= 0) name = name.Substring(cut + 1);
+            var bad = Path.GetInvalidFileNameChars();
+            name = new string(name.Where(ch => !bad.Contains(ch)).ToArray()).Trim().TrimEnd('.');
+            if (name.Length == 0 || name.Length > 200 || name == "." || name == "..") return null;
+            return name;
         }
 
         static void Send(NetworkStream ns, string status, string headers, byte[] body)

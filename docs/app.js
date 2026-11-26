@@ -347,6 +347,7 @@
     resultsEl.innerHTML = '';
     resultBar.hidden = true;
     shareBtn.hidden = true;
+    $('#saveWin').hidden = true;
     setStatus('');
   }
 
@@ -364,6 +365,7 @@
     a.setAttribute('aria-label', name.split('/').pop() + ' 받기');
     resultsEl.appendChild(li);
     updateShare();
+    updateSaveWin();
   }
 
   // ── 결과 미리보기: 받기 전에 작은 그림과 '보기'(새 탭) ──
@@ -1147,6 +1149,32 @@
     }
   }
 
+  // ── 윈도우 프로그램으로 결과 돌려주기: 원본 옆에 저장 ──
+  let winBase = null;
+  const saveWinBtn = $('#saveWin');
+  function updateSaveWin() { saveWinBtn.hidden = !(winBase && results.length > 0); }
+  saveWinBtn.addEventListener('click', async () => {
+    if (busy || !winBase || results.length === 0) return;
+    saveWinBtn.disabled = true;
+    let done = 0, folder = '', failed = '';
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      setStatus('원본 폴더에 저장하는 중… ' + (i + 1) + '/' + results.length);
+      try {
+        const res = await fetch(winBase + 'save?name=' + encodeURIComponent(r.name.split('/').pop()), {
+          method: 'POST', body: r.blob, cache: 'no-store', headers: { 'Content-Type': 'application/octet-stream' },
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) { failed = j.error || '저장하지 못했어요'; break; }
+        done++; folder = j.folder || folder;
+      } catch (_) { failed = '윈도우 프로그램과 연결이 끊겼어요. \'받기\'로 저장해 주세요'; break; }
+    }
+    saveWinBtn.disabled = false;
+    if (done > 0) fetch(winBase + 'reveal', { cache: 'no-store' }).catch(() => {});
+    setStatus(failed ? (done ? done + '개는 저장했고, 나머지는 못 했어요. ' : '') + failed
+      : done + '개를 원본 폴더' + (folder ? '(' + folder + ')' : '') + '에 저장했어요. 폴더를 열어 드렸어요.', !!failed && done === 0);
+  });
+
   // ── 윈도우 프로그램에서 넘겨받기 ──
   // 윈도우용 툭이 이 PC 안(127.0.0.1)에서만 잠깐 내어 주는 파일을 받아 온다. 인터넷으로는 나가지 않는다.
   async function takeFromWindows() {
@@ -1176,7 +1204,19 @@
       }
       if (!got.length) throw new Error('파일이 없어요');
       setItems(got);
-      setStatus(got.length + '개를 받았어요. 아래에서 할 일을 고르세요. 결과는 \'받기\'를 누르면 다운로드 폴더에 저장돼요.');
+      // 새 윈도우 프로그램(2.1부터)은 결과를 돌려받아 원본 옆에 저장해 준다
+      let canSave = false;
+      try { canSave = !!(await (await get(base + 'ping')).json()).save; } catch (_) { /* 예전 프로그램 */ }
+      if (canSave) {
+        winBase = base;
+        let misses = 0;
+        // 창이 열려 있는 동안 10초마다 알린다. 프로그램이 끝났으면 단추를 숨긴다.
+        const beat = setInterval(async () => {
+          try { await get(base + 'ping'); misses = 0; }
+          catch (_) { if (++misses >= 3) { clearInterval(beat); winBase = null; updateSaveWin(); } }
+        }, 10000);
+      }
+      setStatus(got.length + '개를 받았어요. 아래에서 할 일을 고르세요. ' + (canSave ? '결과는 \'원본 폴더에 저장\'을 누르면 원본 옆에 생겨요.' : '결과는 \'받기\'를 누르면 다운로드 폴더에 저장돼요.'));
     } catch (_) {
       setStatus('윈도우 프로그램에서 파일을 받아 오지 못했어요. \'이 기기에 연결\'을 묻는 창이 뜨면 허용해 주세요. 아니면 탐색기에서 파일을 여기로 끌어다 놓아도 돼요.', true);
     }
