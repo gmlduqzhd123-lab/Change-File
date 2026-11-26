@@ -128,7 +128,7 @@
           c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
           const g = c.getContext('2d');
           g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
-          await page.render({ canvasContext: g, viewport: vp }).promise;
+          await page.render({ canvasContext: g, viewport: vp, intent: 'print' }).promise;
           const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9));
           c.width = c.height = 0;
           page.cleanup();
@@ -241,7 +241,7 @@
             c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
             const g = c.getContext('2d');
             g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
-            await page.render({ canvasContext: g, viewport: vp }).promise;
+            await page.render({ canvasContext: g, viewport: vp, intent: 'print' }).promise;
             const jpg = await new Promise((res) => c.toBlob(res, 'image/jpeg', o.quality));
             c.width = c.height = 0;
             const img = await doc.embedJpg(new Uint8Array(await jpg.arrayBuffer()));

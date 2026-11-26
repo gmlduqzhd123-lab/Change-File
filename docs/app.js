@@ -16,6 +16,10 @@
   let busy = false;
 
   // 그림 줄이기 크기 (긴 쪽 픽셀). 고른 값은 이 브라우저에만 기억한다.
+  // 문서 사진 보정 (스캔처럼): 0 흑백 · 1 컬러
+  const SCANS = [[0, '흑백 · 글씨 또렷'], [1, '컬러 유지']];
+  let scanMode = 0;
+  try { if (localStorage.getItem('tuk.scanMode') === '1') scanMode = 1; } catch (_) { /* 저장 못 해도 괜찮다 */ }
   const SIZES = [[1024, '작게 · 1024픽셀'], [1600, '보통 · 1600픽셀'], [2560, '크게 · 2560픽셀']];
   let shrinkSide = 1600;
   try { const v = Number(localStorage.getItem('tuk.shrinkSide')); if (SIZES.some(([s]) => s === v)) shrinkSide = v; } catch (_) { /* 저장 못 해도 괜찮다 */ }
@@ -232,6 +236,7 @@
     if (imgs > 0) choices.push(['shrink', '그림 용량 줄이기']);
     if (imgs > 0) choices.push(['imgwm', '그림에 워터마크']);
     if (imgs > 0) choices.push(['trim', '여백 자르기']);
+    if (imgs > 0) choices.push(['scan', '스캔처럼 보정']);
     if (items.length > 0) choices.push(['zip', 'ZIP으로 묶기']);
     if (items.length > 1) choices.push(['rename', '이름 한꺼번에 바꾸기']);
     if (items.length > 0 && items.every(isZip)) choices.push(['unzip', '압축 풀기']);
@@ -239,7 +244,7 @@
     const GROUPS = [
       ['PDF 만들기', ['pdf', 'pdfall', 'arrange', 'merge']],
       ['PDF 손질', ['pages', 'extract', 'split', 'pagenum', 'wm', 'nup', 'fita4', 'squeeze']],
-      ['바꾸기', ['pdfjpg', 'pdftxt', 'tojpg', 'topng', 'shrink', 'trim', 'imgwm']],
+      ['바꾸기', ['pdfjpg', 'pdftxt', 'tojpg', 'topng', 'shrink', 'scan', 'trim', 'imgwm']],
       ['파일', ['unzip', 'zip', 'rename']],
     ];
     const byId = new Map(choices);
@@ -263,7 +268,9 @@
         first = false;
         b.textContent = byId.get(id);
         b.addEventListener('click', () => run(id));
-        if (id === 'shrink') {
+        if (id === 'scan') {
+          g.appendChild(pair(b, '보정 방식', SCANS, scanMode, (v) => { scanMode = v ? 1 : 0; remember('scanMode', scanMode); }));
+        } else if (id === 'shrink') {
           g.appendChild(pair(b, '줄일 크기', SIZES, shrinkSide, (v) => { shrinkSide = v; remember('shrinkSide', v); }));
         } else if (id === 'pdf') {
           // 여백은 'PDF로'와 'PDF 하나로 묶기'에 함께 쓴다
@@ -693,6 +700,16 @@
           } catch (e) { problems.push(f.name + ': ' + why(e)); }
         }
         if (!png && list.some((x) => !isHeic(x))) notes.push('투명한 부분은 흰색이 돼요');
+      } else if (id === 'scan') {
+        for (let i = 0; i < imgs.length; i++) {
+          const f = imgs[i].file;
+          setStatus('스캔처럼 보정하는 중… ' + (i + 1) + '/' + imgs.length);
+          try {
+            const blob = await scanImage(f, scanMode === 1);
+            addResult(stem(f.name) + '_스캔.jpg', blob, size(blob.size));
+          } catch (e) { if (e === STOP) throw e; problems.push(f.name + ': ' + why(e)); }
+        }
+        if (results.length > 1) notes.push('\'이 결과로 이어서 하기\'를 누르면 PDF 하나로 묶을 수 있어요');
       } else if (id === 'trim') {
         let none = 0;
         for (let i = 0; i < imgs.length; i++) {
@@ -844,6 +861,109 @@
   }
 
   window.TukImage = { decode };
+
+  /**
+   * 문서 사진을 스캔처럼: 종이 바탕의 밝기를 구역마다 재서 그림자·누런빛을 걷어 내고(바탕 → 흰색), 글씨는 진하게.
+   * color가 참이면 색을 남기고, 아니면 흑백. 크기는 긴 쪽 3000픽셀까지.
+   */
+  async function scanImage(file, color) {
+    const src = await decode(file);
+    let w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+    const k = Math.min(1, 3000 / Math.max(w, h));
+    w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+    g.drawImage(src, 0, 0, w, h);
+    if (src.close) src.close();
+    const img = g.getImageData(0, 0, w, h), d = img.data;
+    // 1) 작은 칸마다 '종이 색'을 잰다: 빨강·초록·파랑 따로, 그 칸에서 밝은 쪽 10% 자리의 값.
+    //    색마다 따로 재야 누런 종이·누런 조명도 흰색이 된다.
+    const cell = Math.max(6, Math.round(Math.max(w, h) / 110));
+    const gw = Math.ceil(w / cell), gh = Math.ceil(h / cell);
+    const hist = new Uint32Array(256);
+    // 종이인 점만 고른다: 세 색 중 가장 낮은 값이 높은(=희끄무레한) 위쪽 10%. 빨간 도장·파란 펜은 한 색만 밝아서 빠진다.
+    const raw = [new Float32Array(gw * gh), new Float32Array(gw * gh), new Float32Array(gw * gh)];
+    for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+      hist.fill(0);
+      const x1 = Math.min(w, (gx + 1) * cell), y1 = Math.min(h, (gy + 1) * cell);
+      let n = 0;
+      for (let y = gy * cell; y < y1; y++) for (let x = gx * cell; x < x1; x++) {
+        const i = (y * w + x) * 4;
+        hist[Math.min(d[i], d[i + 1], d[i + 2])]++; n++;
+      }
+      let need = Math.max(1, Math.round(n * 0.1)), v = 255;
+      while (v > 0 && (need -= hist[v]) > 0) v--;
+      let r = 0, gsum = 0, bsum = 0, cnt = 0;
+      for (let y = gy * cell; y < y1; y++) for (let x = gx * cell; x < x1; x++) {
+        const i = (y * w + x) * 4;
+        if (Math.min(d[i], d[i + 1], d[i + 2]) >= v) { r += d[i]; gsum += d[i + 1]; bsum += d[i + 2]; cnt++; }
+      }
+      const at = gy * gw + gx;
+      raw[0][at] = Math.max(32, r / cnt); raw[1][at] = Math.max(32, gsum / cnt); raw[2][at] = Math.max(32, bsum / cnt);
+    }
+    const grids = [0, 1, 2].map((ch) => {
+      let bg = raw[ch];
+      // 2) 글씨로 꽉 찬 칸은 종이가 안 보여 어둡게 재진다. 이웃 칸의 밝은 값으로 메우고(3번), 한 번 고르게 한다.
+      //    칸이 작아서 그림자 경계는 그대로 따라간다.
+      const near = (srcGrid, pick) => {
+        const out = new Float32Array(gw * gh);
+        for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+          let sum = 0, cnt = 0, mx = 0;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const yy = gy + dy, xx = gx + dx;
+            if (yy < 0 || xx < 0 || yy >= gh || xx >= gw) continue;
+            const v = srcGrid[yy * gw + xx]; sum += v; cnt++; if (v > mx) mx = v;
+          }
+          out[gy * gw + gx] = pick === 'max' ? mx : sum / cnt;
+        }
+        return out;
+      };
+      // 밝은 값으로 메운 만큼 다시 줄여(가장 어두운 이웃) 그림자 자리가 밀리지 않게 한다
+      const far = (srcGrid) => {
+        const out = new Float32Array(gw * gh);
+        for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+          let mn = 255;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const yy = gy + dy, xx = gx + dx;
+            if (yy < 0 || xx < 0 || yy >= gh || xx >= gw) continue;
+            const v = srcGrid[yy * gw + xx]; if (v < mn) mn = v;
+          }
+          out[gy * gw + gx] = mn;
+        }
+        return out;
+      };
+      for (let i = 0; i < 3; i++) bg = near(bg, 'max');
+      for (let i = 0; i < 3; i++) bg = far(bg);
+      return near(bg, 'avg');
+    });
+    // 3) 점마다: 종이 색으로 나눠 고르게 편 뒤, 밝은 곳은 흰색으로·어두운 곳은 더 진하게
+    const lo = 0.45, hi = 0.9, span = hi - lo;
+    const out3 = [0, 0, 0];
+    for (let y = 0; y < h; y++) {
+      const fy = Math.min(gh - 1, Math.max(0, (y + 0.5) / cell - 0.5)), y0 = Math.floor(fy), y1 = Math.min(gh - 1, y0 + 1), ty = fy - y0;
+      for (let x = 0; x < w; x++) {
+        const fx = Math.min(gw - 1, Math.max(0, (x + 0.5) / cell - 0.5)), x0 = Math.floor(fx), x1 = Math.min(gw - 1, x0 + 1), tx = fx - x0;
+        const i = (y * w + x) * 4;
+        for (let ch = 0; ch < 3; ch++) {
+          const bg = grids[ch];
+          const b = (bg[y0 * gw + x0] * (1 - tx) + bg[y0 * gw + x1] * tx) * (1 - ty) + (bg[y1 * gw + x0] * (1 - tx) + bg[y1 * gw + x1] * tx) * ty;
+          out3[ch] = d[i + ch] / b;
+        }
+        if (color) {
+          for (let ch = 0; ch < 3; ch++) { const v = (out3[ch] - lo) / span; d[i + ch] = v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255); }
+        } else {
+          const v = (out3[0] * 0.3 + out3[1] * 0.59 + out3[2] * 0.11 - lo) / span;
+          d[i] = d[i + 1] = d[i + 2] = v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255);
+        }
+      }
+    }
+    g.putImageData(img, 0, 0);
+    const blob = await new Promise((res, rej) => c.toBlob((x) => (x ? res(x) : rej(new Error('그림을 만들지 못했어요'))), 'image/jpeg', 0.85));
+    c.width = c.height = 0;
+    return blob;
+  }
 
   /**
    * 여백 자르기: 네 귀퉁이와 같은 색(흰 바탕·검은 띠·투명)인 테두리를 잘라 낸다.

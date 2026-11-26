@@ -161,6 +161,29 @@ a { color: inherit; }
       const r = results(); need(r.length === 1 && starts(await bytes(r[0]), JPG), status());
       return r[0].note + (win.heic2any ? ' · 도구를 불러와서 읽음' : ' · 브라우저가 바로 읽음');
     }],
+    ['스캔처럼 보정', async () => {
+      // 한쪽이 어둡게 그늘진 누런 종이에 검은 글씨
+      const c = document.createElement('canvas'); c.width = 1200; c.height = 900;
+      const g = c.getContext('2d');
+      const grad = g.createLinearGradient(0, 0, 1200, 900);
+      grad.addColorStop(0, '#e8dcc0'); grad.addColorStop(1, '#8a8068');
+      g.fillStyle = grad; g.fillRect(0, 0, 1200, 900);
+      g.fillStyle = '#2a2622'; g.font = 'bold 60px sans-serif';
+      for (let i = 0; i < 8; i++) g.fillText('가정통신문 안내 ' + i, 80, 120 + i * 95);
+      const photo = await new Promise((res) => c.toBlob((b) => res(new File([b], '문서사진.jpg', { type: 'image/jpeg' })), 'image/jpeg', 0.92));
+      await setFiles([photo]); click('스캔처럼 보정'); await done();
+      const r = results(); need(r.length === 1 && starts(await bytes(r[0]), JPG), status());
+      const bmp = await createImageBitmap(await (await fetch(r[0].url)).blob());
+      const o = document.createElement('canvas'); o.width = bmp.width; o.height = bmp.height;
+      const og = o.getContext('2d'); og.drawImage(bmp, 0, 0);
+      const lum = (x, y) => { const p = og.getImageData(x, y, 1, 1).data; return Math.round((p[0] + p[1] + p[2]) / 3); };
+      const light = lum(1000, 60), dark = lum(1150, 860), ink = Math.min(lum(100, 100), lum(98, 105), lum(104, 98), lum(110, 110));
+      need(light > 235 && dark > 235, '바탕이 하얗지 않아요 (밝은 쪽 ' + light + ', 그늘 쪽 ' + dark + ')');
+      let darkest = 255; const strip = og.getImageData(80, 70, 500, 60).data;
+      for (let i = 0; i < strip.length; i += 4) darkest = Math.min(darkest, strip[i]);
+      need(darkest < 60, '글씨가 진하지 않아요 (' + darkest + ')');
+      return '바탕 ' + light + '·' + dark + ' (255가 흰색) · 글씨 ' + darkest;
+    }],
     ['여백 자르기', async () => {
       await setFiles([await picture('캡처.png', 900, 700, '#3C8CE8')]);
       click('여백 자르기'); await done();

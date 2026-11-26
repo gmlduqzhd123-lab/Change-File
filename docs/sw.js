@@ -2,7 +2,7 @@
 // 파일은 어디로도 보내지 않는다. 다른 앱에서 '공유'로 받은 파일도 이 기기 안에만 잠깐 둔다.
 'use strict';
 
-const VERSION = 'tuk-2.1.0';
+const VERSION = 'tuk-2.2.0';
 const SHELL = VERSION + '-shell';
 const LIBS = 'tuk-libs';          // 버전이 주소에 박힌 라이브러리 — 바뀌지 않으니 계속 쓴다
 const SHARE = 'tuk-share';        // 공유로 받은 파일을 화면이 꺼낼 때까지만 둔다
@@ -71,10 +71,13 @@ async function cacheFirst(req) {
 // 인터넷이 되면 늘 새 것을, 안 되면 담아 둔 것을
 async function networkFirst(req) {
   const shell = await caches.open(SHELL);
-  const key = req.mode === 'navigate' ? new URL('./', BASE).href : req.url.split('#')[0];
+  // 담아 둘 이름: 주소에서 ?…와 #…를 뗀 것. 첫 화면(./ 또는 index.html)은 './' 하나로.
+  let key = req.url.split('#')[0].split('?')[0];
+  if (key === BASE || key === BASE + 'index.html') key = new URL('./', BASE).href;
   try {
-    const res = await fetch(req);
-    if (res.ok && res.type === 'basic' && (req.mode === 'navigate' || PAGES.some((p) => new URL(p, BASE).href === key))) {
+    // 브라우저가 10분쯤 받아 두는 것을 믿지 않고 늘 서버에 새 것인지 물어본다 (안 바뀌었으면 금방 끝난다)
+    const res = await fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin', redirect: 'follow' }));
+    if (res.ok && res.type === 'basic' && PAGES.some((p) => new URL(p, BASE).href === key)) {
       await shell.put(key, res.clone());
     }
     return res;
