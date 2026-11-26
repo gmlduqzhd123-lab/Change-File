@@ -253,6 +253,23 @@ a { color: inherit; }
       need(buttons().some((b) => b.textContent.startsWith('쪽 번호 넣기')), 'PDF 단추가 없어요');
       return '빼기 → PDF → 이어서 하기 (' + doc.querySelector('#files .nm').textContent + ')';
     }],
+    ['그만하기 (긴 작업 멈추기)', async () => {
+      const list = [];
+      for (let i = 1; i <= 12; i++) list.push(await picture('큰 ' + i + '.jpg', 2400, 1800, '#8A5CD6', { noise: true }));
+      await setFiles(list);
+      click('그림 용량 줄이기');
+      for (let i = 0; i < 100 && doc.querySelector('#stopBtn').hidden; i++) await sleep(20);
+      need(!doc.querySelector('#stopBtn').hidden, '그만하기 단추가 보이지 않아요');
+      need(!doc.querySelector('#prog').hidden, '진행 막대가 보이지 않아요');
+      await sleep(250);
+      doc.querySelector('#stopBtn').click();
+      const until = Date.now() + 30000;
+      while (Date.now() < until && !/그만했어요/.test(status())) await sleep(100);
+      need(/그만했어요/.test(status()), '멈추지 않았어요: ' + status());
+      need(results().length < 12, '끝까지 해 버렸어요');
+      need(doc.querySelector('#stopBtn').hidden, '단추가 남아 있어요');
+      return status();
+    }],
     ['이름 한꺼번에 바꾸기', async () => {
       await setFiles([new File(['a'], '나.txt'), new File(['b'], '가.txt'), new File(['c'], '다.txt')]);
       await form('이름 한꺼번에 바꾸기', (e) => { e.base.value = '과제'; e.where.value = 'after'; e.start.value = '1'; e.order.value = 'name'; e.keep.checked = false; });

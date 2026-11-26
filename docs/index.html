@@ -159,6 +159,20 @@ section .lead { color: var(--muted); margin: 0 0 24px; }
 .smartscreen .win .run { display: inline-block; margin-top: 6px; padding: 2px 12px; border: 1px solid #fff; border-radius: 4px; font-weight: 700; }
 .smartscreen .arrow { color: var(--muted); font-size: 20px; }
 .status { margin-top: 16px; font-size: 15px; min-height: 1.6em; }
+.working { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.prog { flex: 1; height: 8px; border-radius: 999px; background: var(--sheet2); overflow: hidden; }
+.prog i { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--accent); transition: width .2s; }
+.prog.ind i { width: 35%; animation: slide 1.2s ease-in-out infinite alternate; }
+@keyframes slide { from { margin-left: 0; } to { margin-left: 65%; } }
+.working .btn { flex: none; }
+.tasks { margin-top: 14px; }
+.tasks > span { display: block; font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 8px; }
+.tasks .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.tasks button { min-height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--sheet2); color: var(--ink); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
+/* 설치한 앱: 도구만 */
+html.app .hero, html.app main > section:not(#web), html.app #web h2, html.app #web .lead, html.app nav.links { display: none; }
+html.app #web { padding-top: 16px; }
+html.app .theme { margin-left: auto; }
 .status.bad { color: var(--bad); }
 .results { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
 .results li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
@@ -239,6 +253,17 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
           <b>여기에 파일이나 폴더를 놓으세요</b>
           <span>또는 눌러서 고르기 · PDF · 그림(JPG·PNG·HEIC 등) · ZIP · 아무 파일</span>
         </div>
+        <div class="tasks" id="tasks">
+          <span>하고 싶은 일로 시작하기</span>
+          <div class="row">
+            <button type="button" data-task="pdfall">사진을 PDF 하나로</button>
+            <button type="button" data-task="merge">PDF 합치기</button>
+            <button type="button" data-task="pages">PDF 쪽 빼기·돌리기</button>
+            <button type="button" data-task="shrink">사진 용량 줄이기</button>
+            <button type="button" data-task="squeeze">스캔 PDF 용량 줄이기</button>
+            <button type="button" data-task="unzip">ZIP 풀기</button>
+          </div>
+        </div>
         <input type="file" id="picker" multiple class="sr" tabindex="-1">
         <input type="file" id="camera" accept="image/*" capture="environment" class="sr" tabindex="-1">
         <div class="more" id="more" hidden><button class="btn small" id="camBtn" type="button">카메라로 찍기</button><span>찍을 때마다 아래 목록에 더해져요</span></div>
@@ -249,6 +274,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
         <div class="pages" id="pages" hidden></div>
         <div class="opts" id="opts" hidden></div>
         <div class="status" id="status" role="status" aria-live="polite"></div>
+        <div class="working"><div class="prog" id="prog" role="progressbar" aria-label="진행 정도" aria-valuemin="0" aria-valuemax="100" hidden><i></i></div><button class="btn small" id="stopBtn" type="button" hidden>그만하기</button></div>
         <ul class="results" id="results"></ul>
         <div class="bar" id="resultBar" hidden>
           <button class="btn small primary" id="shareAll" type="button" hidden>공유하기</button>
@@ -359,6 +385,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
 
 <footer>
   <div class="wrap">툭 · 파일을 툭 놓으면 끝 · <a href="https://github.com/gmlduqzhd123-lab/Change-File">소스 코드</a> ·
+    <span id="showAllWrap" hidden><a href="#" id="showAll">툭 소개·윈도우 프로그램 보기</a> · </span>
     <a href="selftest.html">이 기기에서 잘 되는지 점검</a> ·
     <a href="https://github.com/gmlduqzhd123-lab/Change-File/issues/new" rel="noopener">불편한 점 알리기</a></div>
 </footer>

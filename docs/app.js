@@ -61,18 +61,46 @@
   });
 
   // ── 파일 받기 ──
-  drop.addEventListener('click', () => picker.click());
+  // 하고 싶은 일로 시작하기: 그 일에 맞는 파일만 고르게 하고, 고르면 바로 시작한다
+  const TASKS = {
+    pdfall: 'image/*,.heic,.heif', merge: '.pdf,application/pdf', pages: '.pdf,application/pdf',
+    squeeze: '.pdf,application/pdf', shrink: 'image/*,.heic,.heif', unzip: '.zip,application/zip',
+  };
+  let intent = null;
+  const plainPick = () => { intent = null; picker.accept = ''; };
+  document.querySelectorAll('#tasks [data-task]').forEach((b) => b.addEventListener('click', () => {
+    if (busy) return;
+    intent = b.dataset.task;
+    adding = false;
+    picker.accept = TASKS[intent] || '';
+    picker.click();
+  }));
+  function startIntent(id) {
+    const imgs = items.filter(isImg).length, pdfs = items.filter(isPdf).length;
+    if (id === 'pdfall') { if (imgs > 1) return run('pdfall'); if (imgs === 1) return run('pdf'); return setStatus('사진이나 그림을 골라 주세요.', true); }
+    if (id === 'shrink') { if (imgs > 0) return run('shrink'); return setStatus('사진이나 그림을 골라 주세요.', true); }
+    if (id === 'merge') {
+      if (pdfs > 1) return run('merge');
+      return setStatus(pdfs === 1 ? 'PDF가 2개 이상 있어야 합칠 수 있어요. \'+ 파일 더하기\'로 더 고른 뒤 \'PDF 합치기\'를 누르세요.' : 'PDF를 골라 주세요.', pdfs !== 1);
+    }
+    if (id === 'pages' || id === 'squeeze') { if (pdfs > 0) return run(id); return setStatus('PDF를 골라 주세요.', true); }
+    if (id === 'unzip') { if (items.length > 0 && items.every(isZip)) return run('unzip'); return setStatus('ZIP 파일을 골라 주세요.', true); }
+  }
+
+  drop.addEventListener('click', () => { plainPick(); picker.click(); });
   drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); } });
   let adding = false;   // '파일 더하기'로 연 고르기 창이면 지금 목록 뒤에 더한다
   picker.addEventListener('change', () => {
     const list = [...picker.files].map((f) => ({ file: f, path: f.name }));
     picker.value = '';
     const add = adding; adding = false;
+    const want = intent; plainPick();
     if (!list.length) return;
     setItems(add ? items.concat(list) : list);
     if (add) setStatus(list.length + '개를 더했어요. 모두 ' + items.length + '개예요.');
+    else if (want) startIntent(want);
   });
-  $('#addBtn').addEventListener('click', () => { if (busy) return; adding = true; picker.click(); });
+  $('#addBtn').addEventListener('click', () => { if (busy) return; plainPick(); adding = true; picker.click(); });
   $('#clearList').addEventListener('click', () => { if (!busy) setItems([]); });
   ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'dragend'].forEach((t) => drop.addEventListener(t, () => drop.classList.remove('over')));
@@ -171,6 +199,7 @@
       filesEl.appendChild(li);
     }
     $('#listBar').hidden = items.length === 0;
+    $('#tasks').hidden = items.length > 0;
     if (items.length > shown.length) {
       const li = document.createElement('li');
       li.textContent = '그 밖에 ' + (items.length - shown.length) + '개';
@@ -273,12 +302,45 @@
     return g;
   }
 
+  // 일하는 동안: 진행 막대를 보여 주고, '그만하기'를 누르면 다음 단계에서 멈춘다.
+  const STOP = new Error('그만했어요');
+  const progEl = $('#prog'), stopBtn = $('#stopBtn');
+  let stopAsked = false;
+  stopBtn.addEventListener('click', () => { stopAsked = true; stopBtn.disabled = true; stopBtn.textContent = '멈추는 중…'; });
   function setStatus(text, bad) {
+    // 모든 작업이 단계마다 상태를 알리므로, 여기서 멈추면 어디서든 멈춘다
+    if (busy && stopAsked) throw STOP;
     statusEl.textContent = text;
     statusEl.classList.toggle('bad', !!bad);
+    const working = busy && !!text;
+    progEl.hidden = !working;
+    stopBtn.hidden = !working;
+    if (working) {
+      const m = /(\d+)\s*\/\s*(\d+)/.exec(text), pc = /(\d+)%/.exec(text);
+      const v = m && Number(m[2]) > 0 ? Math.min(1, Number(m[1]) / Number(m[2])) : pc ? Number(pc[1]) / 100 : null;
+      progEl.classList.toggle('ind', v === null);
+      progEl.firstElementChild.style.width = v === null ? '' : Math.round(v * 100) + '%';
+      progEl.setAttribute('aria-valuenow', v === null ? '' : String(Math.round(v * 100)));
+    }
+  }
+  /** 일이 끝났을 때의 한 줄 */
+  function finish(problems, notes) {
+    const stopped = stopAsked;
+    stopAsked = false; stopBtn.disabled = false; stopBtn.textContent = '그만하기';
+    if (stopped) {
+      setStatus(results.length ? '그만했어요. ' + results.length + '개까지 만들었어요.' : '그만했어요. 만든 파일이 없어요.');
+    } else {
+      const head = results.length > 0
+        ? (problems.length ? '일부만 됐어요. ' : '다 됐어요. ') + results.length + '개를 만들었어요.'
+        : '만든 파일이 없어요.';
+      setStatus([head].concat(notes, problems).join(' · '), problems.length > 0 && results.length === 0);
+    }
+    resultBar.hidden = results.length === 0;
+    $('#zipAll').hidden = results.length < 2;
   }
 
   function clearResults() {
+    stopAsked = false;
     for (const r of results) if (r.url) URL.revokeObjectURL(r.url);
     results = [];
     pdfThumbs = 0;
@@ -384,7 +446,10 @@
     } catch (e) {
       editor = null;
       pagesEl.hidden = true; pagesEl.innerHTML = '';
-      setStatus(why(e), true);
+      busy = false;
+      const stopped = e === STOP;
+      stopAsked = false; stopBtn.disabled = false; stopBtn.textContent = '그만하기';
+      setStatus(why(e), !stopped);
     } finally {
       busy = false;
       actionsEl.querySelectorAll('button').forEach((b) => (b.disabled = false));
@@ -582,10 +647,7 @@
       if (def.all && results.length > 1) notes.push('아래 \'결과를 ZIP 하나로 받기\'로 한 번에 받을 수 있어요');
       busy = false;
       form.querySelectorAll('button').forEach((b) => (b.disabled = false));
-      const head = results.length ? (problems.length ? '일부만 됐어요. ' : '다 됐어요. ') + results.length + '개를 만들었어요.' : '만든 파일이 없어요.';
-      setStatus([head].concat(notes, problems).join(' · '), problems.length > 0 && results.length === 0);
-      resultBar.hidden = results.length === 0;
-      $('#zipAll').hidden = results.length < 2;
+      finish(problems, notes);
     });
     optsEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     form.querySelector('input, select').focus();
@@ -716,15 +778,11 @@
       busy = false;
       actionsEl.querySelectorAll('button').forEach((b) => (b.disabled = false));
     }
-    const head = results.length > 0
-      ? (problems.length ? '일부만 됐어요. ' : '다 됐어요. ') + results.length + '개를 만들었어요.'
-      : '만든 파일이 없어요.';
-    setStatus([head].concat(notes, problems).join(' · '), problems.length > 0 && results.length === 0);
-    resultBar.hidden = results.length === 0;
-    $('#zipAll').hidden = results.length < 2;
+    finish(problems, notes);
   }
 
   function why(e) {
+    if (e === STOP) return '그만했어요';
     if (e && e.name === 'EncodingError') return '그림 파일이 손상됐거나 읽을 수 없는 형식이에요';
     if (e && e.name === 'NotReadableError') return '파일을 읽지 못했어요. 다른 프로그램이 쓰고 있지 않은지 확인해 주세요';
     if (e && /corrupted zip|end of central directory/i.test(e.message || '')) return '압축 파일이 손상됐거나 ZIP 형식이 아니에요';
@@ -1033,6 +1091,17 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  // 설치한 앱(또는 ?app=1)에서는 소개 글 없이 도구만 보여 준다
+  if (standalone || /[?&]app=1/.test(location.search)) {
+    document.documentElement.classList.add('app');
+    $('#showAllWrap').hidden = false;
+    $('#showAll').addEventListener('click', (e) => {
+      e.preventDefault();
+      document.documentElement.classList.remove('app');
+      $('#showAllWrap').hidden = true;
+      window.scrollTo(0, 0);
+    });
+  }
   const installBtn = $('#installBtn');
   let installEvent = null;
   window.addEventListener('beforeinstallprompt', (e) => {
