@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>툭 점검</title>
+<style>
+:root { --paper: #F6F3EE; --sheet: #fff; --ink: #28241F; --muted: #6F665C; --line: #DDD5C9; --accent: #E86E3C; --ok: #2F8F5B; --bad: #C2453A; }
+@media (prefers-color-scheme: dark) { :root { --paper: #1B1916; --sheet: #24211D; --ink: #F1ECE4; --muted: #ADA396; --line: #3A352E; --accent: #F0844F; --ok: #5CC28A; --bad: #EE7B70; } }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; background: var(--paper); color: var(--ink); font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; line-height: 1.6; word-break: keep-all; }
+main { max-width: 820px; margin: 0 auto; }
+h1 { font-size: 26px; margin: 8px 0 4px; }
+p { margin: 6px 0; color: var(--muted); }
+.bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+button { min-height: 44px; padding: 0 20px; border-radius: 999px; border: 1px solid var(--line); background: var(--sheet); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .5; }
+#sum { font-weight: 700; color: var(--ink); min-height: 1.6em; }
+table { width: 100%; border-collapse: collapse; background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 14px; }
+td, th { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+td.r { white-space: nowrap; font-weight: 700; }
+.ok { color: var(--ok); } .bad { color: var(--bad); } .wait { color: var(--muted); }
+td.note { color: var(--muted); overflow-wrap: anywhere; }
+iframe { width: 100%; height: 420px; margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--sheet); }
+a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <p><a href="./#web">← 툭으로 돌아가기</a></p>
+  <h1>툭 점검</h1>
+  <p>이 기기·브라우저에서 툭의 기능이 제대로 되는지 스스로 확인해요. 시험용 그림과 PDF는 이 화면 안에서 만들고, 어디로도 보내지 않아요. 1분쯤 걸려요.</p>
+  <div class="bar">
+    <button class="primary" id="go" type="button">점검 시작</button>
+    <button id="copy" type="button" hidden>결과 복사</button>
+  </div>
+  <p id="sum" role="status" aria-live="polite"></p>
+  <table aria-label="점검 결과"><thead><tr><th>기능</th><th>결과</th><th>내용</th></tr></thead><tbody id="rows"></tbody></table>
+  <p>안 되는 항목이 있으면 <b>결과 복사</b>를 눌러 <a href="https://github.com/gmlduqzhd123-lab/Change-File/issues/new" rel="noopener">불편한 점 알리기</a>에 붙여 넣어 주세요.</p>
+  <iframe id="app" title="점검 중인 툭 화면" hidden></iframe>
+</main>
+<script>
+(() => {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const rows = $('#rows'), sum = $('#sum'), frame = $('#app');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let win, doc;
+  const log = [];
+
+  // ── 툭 화면(iframe)을 사람처럼 다룬다 ──
+  async function load() {
+    frame.hidden = false;
+    await new Promise((res, rej) => { frame.onload = res; frame.onerror = rej; frame.src = './?selftest=1#web'; });
+    win = frame.contentWindow; doc = frame.contentDocument;
+    for (let i = 0; i < 100 && !doc.querySelector('#picker'); i++) await sleep(100);
+    if (!win.TukPdf) throw new Error('툭 화면을 불러오지 못했어요');
+  }
+  async function setFiles(list) {
+    const dt = new win.DataTransfer();
+    for (const f of list) dt.items.add(f);
+    const pk = doc.querySelector('#picker');
+    pk.files = dt.files;
+    pk.dispatchEvent(new win.Event('change'));
+    await sleep(150);
+  }
+  const buttons = () => [...doc.querySelectorAll('#actions button')];
+  function click(prefix) {
+    const b = buttons().find((x) => x.textContent.startsWith(prefix));
+    if (!b) throw new Error('단추가 없어요: ' + prefix + ' (있는 단추: ' + buttons().map((x) => x.textContent).join(', ') + ')');
+    b.click();
+  }
+  const status = () => doc.querySelector('#status').textContent;
+  async function done(limit) {
+    await sleep(60);
+    const until = Date.now() + (limit || 90000);
+    while (Date.now() < until) {
+      if (/다 됐어요|일부만 됐어요|만든 파일이 없어요/.test(status())) return status();
+      await sleep(150);
+    }
+    throw new Error('시간이 너무 오래 걸려요 (마지막 상태: ' + status() + ')');
+  }
+  const results = () => [...doc.querySelectorAll('#results li')].map((li) => ({
+    name: li.querySelector('.nm').textContent, note: li.querySelector('.note').textContent, url: li.querySelector('a').href,
+  }));
+  const bytes = async (r) => new Uint8Array(await (await fetch(r.url)).arrayBuffer());
+  const asFile = async (r, type) => new File([await bytes(r)], r.name, { type });
+  async function form(prefix, fill) {
+    click(prefix);
+    await sleep(150);
+    const f = doc.querySelector('#opts form');
+    if (!f) throw new Error('고르는 칸이 열리지 않았어요');
+    if (fill) fill(f.elements);
+    f.querySelector('button[type=submit]').click();
+    return done();
+  }
+  const starts = (b, sig) => sig.every((v, i) => b[i] === v);
+  const PDF = [0x25, 0x50, 0x44, 0x46], JPG = [0xFF, 0xD8, 0xFF], PNG = [0x89, 0x50, 0x4E, 0x47], ZIP = [0x50, 0x4B];
+  const need = (cond, msg) => { if (!cond) throw new Error(msg); };
+
+  // ── 시험용 파일 ──
+  function picture(name, w, h, color, opts) {
+    const o = opts || {};
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    if (!o.clear) { g.fillStyle = o.bg || '#ffffff'; g.fillRect(0, 0, w, h); }
+    g.fillStyle = color;
+    g.fillRect(w * 0.25, h * 0.25, w * 0.5, h * 0.5);
+    if (o.noise) { for (let i = 0; i < 4000; i++) { g.fillStyle = 'hsl(' + (i * 37 % 360) + ',70%,50%)'; g.fillRect((i * 97) % w, (i * 53) % h, 9, 9); } }
+    g.fillStyle = '#000'; g.font = 'bold ' + Math.round(h / 8) + 'px sans-serif'; g.fillText(name, w * 0.3, h * 0.55);
+    const type = /\.png$/.test(name) ? 'image/png' : 'image/jpeg';
+    return new Promise((res) => c.toBlob((b) => res(new File([b], name, { type })), type, 0.92));
+  }
+
+  // ── 점검 항목 ──
+  let pdfA, pdfB, numbered;
+  const TESTS = [
+    ['그림 → PDF 하나로 묶기', async () => {
+      await setFiles([await picture('사진 1.jpg', 800, 600, '#E86E3C'), await picture('사진 2.jpg', 600, 800, '#3C8CE8'), await picture('사진 10.png', 500, 500, '#2F8F5B')]);
+      click('PDF 하나로 묶기'); await done();
+      const r = results(); need(r.length === 1, status());
+      need(starts(await bytes(r[0]), PDF), 'PDF가 아니에요');
+      pdfA = await asFile(r[0], 'application/pdf');
+      return r[0].name + ' · ' + r[0].note;
+    }],
+    ['순서 정해서 묶기 (미리보기)', async () => {
+      click('순서 정해서 묶기');
+      let make;
+      for (let i = 0; i < 100 && !make; i++) { await sleep(150); make = [...doc.querySelectorAll('#pages button')].find((b) => b.textContent.startsWith('이대로')); }
+      need(make, '미리보기가 열리지 않았어요');
+      const cards = doc.querySelectorAll('#pages .thumb').length;
+      need(cards === 3, '사진 카드가 ' + cards + '장');
+      make.click();
+      for (let i = 0; i < 200 && results().length === 0; i++) await sleep(150);
+      const r = results(); need(r.length === 1, '결과가 없어요');
+      pdfB = await asFile(r[0], 'application/pdf');
+      const close = [...doc.querySelectorAll('#pages button')].find((b) => /닫기/.test(b.textContent));
+      if (close) close.click();
+      return '카드 ' + cards + '장 · ' + r[0].note;
+    }],
+    ['그림 용량 줄이기', async () => {
+      const big = await picture('큰사진.jpg', 3200, 2400, '#8A5CD6', { noise: true });
+      await setFiles([big]); click('그림 용량 줄이기'); await done();
+      const r = results(); need(r.length === 1, status());
+      const b = await bytes(r[0]); need(starts(b, JPG), 'JPG가 아니에요'); need(b.length < big.size, '줄지 않았어요');
+      return r[0].note;
+    }],
+    ['JPG로 바꾸기 · PNG 투명', async () => {
+      await setFiles([await picture('투명.png', 400, 300, '#E86E3C', { clear: true })]);
+      click('JPG로 바꾸기'); await done();
+      const r = results(); need(r.length === 1 && starts(await bytes(r[0]), JPG), status());
+      return r[0].note;
+    }],
+    ['아이폰 사진(HEIC) 읽기', async () => {
+      const blob = await (await fetch('selftest-sample.heic')).blob();
+      await setFiles([new File([blob], '아이폰.heic', { type: 'image/heic' })]);
+      click('JPG로 바꾸기'); await done(120000);
+      const r = results(); need(r.length === 1 && starts(await bytes(r[0]), JPG), status());
+      return r[0].note + (win.heic2any ? ' · 도구를 불러와서 읽음' : ' · 브라우저가 바로 읽음');
+    }],
+    ['여백 자르기', async () => {
+      await setFiles([await picture('캡처.png', 900, 700, '#3C8CE8')]);
+      click('여백 자르기'); await done();
+      const r = results(); need(r.length === 1 && starts(await bytes(r[0]), PNG), status());
+      return r[0].note;
+    }],
+    ['그림에 워터마크', async () => {
+      await setFiles([await picture('사진.jpg', 800, 600, '#2F8F5B')]);
+      await form('그림에 워터마크');
+      const r = results(); need(r.length === 1 && starts(await bytes(r[0]), JPG), status());
+      return r[0].name;
+    }],
+    ['PDF 합치기', async () => {
+      need(pdfA && pdfB, '앞 단계의 PDF가 없어요');
+      await setFiles([new File([pdfA], '가.pdf', { type: 'application/pdf' }), new File([pdfB], '나.pdf', { type: 'application/pdf' })]);
+      click('PDF 합치기'); await done();
+      const r = results(); need(r.length === 1 && /6쪽/.test(r[0].note), '6쪽이 아니에요: ' + (r[0] && r[0].note));
+      pdfA = await asFile(r[0], 'application/pdf');
+      return r[0].note;
+    }],
+    ['쪽 번호 넣기', async () => {
+      await setFiles([new File([pdfA], '문서.pdf', { type: 'application/pdf' })]);
+      await form('쪽 번호 넣기');
+      const r = results(); need(r.length === 1 && starts(await bytes(r[0]), PDF), status());
+      numbered = await asFile(r[0], 'application/pdf');
+      return r[0].name;
+    }],
+    ['워터마크 넣기 (PDF)', async () => {
+      await form('워터마크 넣기');
+      const r = results(); need(r.length === 1 && starts(await bytes(r[0]), PDF), status());
+      return r[0].name;
+    }],
+    ['쪽 뽑기 (2-3, 끝)', async () => {
+      await form('쪽 뽑기', (e) => { e.range.value = '2-3, 끝'; e.each.value = '0'; });
+      const r = results(); need(r.length === 1 && /3쪽/.test(r[0].note), status());
+      return r[0].name + ' · ' + r[0].note;
+    }],
+    ['쪽마다 나누기', async () => {
+      click('쪽마다 나누기'); await done();
+      need(results().length === 6, '6개가 아니에요: ' + results().length);
+      return '6개';
+    }],
+    ['모아 찍기', async () => {
+      await form('모아 찍기', (e) => { e.per.value = '4'; });
+      const r = results(); need(r.length === 1 && /6쪽 → 2장/.test(r[0].note), status() + ' ' + (r[0] && r[0].note));
+      return r[0].note;
+    }],
+    ['A4로 맞추기', async () => {
+      const s = await form('A4로 맞추기', (e) => { e.margin.value = '20'; });
+      const r = results(); need(r.length === 1 && starts(await bytes(r[0]), PDF), s);
+      return r[0].note;
+    }],
+    ['PDF → JPG 그림', async () => {
+      click('PDF → JPG'); await done(120000);
+      const r = results(); need(r.length === 6 && starts(await bytes(r[0]), JPG), status());
+      return '6장';
+    }],
+    ['글자 뽑기 (TXT)', async () => {
+      need(numbered, '쪽 번호를 넣은 PDF가 없어요');
+      await setFiles([new File([numbered], '번호.pdf', { type: 'application/pdf' })]);
+      click('글자 뽑기'); await done();
+      const r = results(); need(r.length === 1, status());
+      const t = new TextDecoder().decode(await bytes(r[0]));
+      need(/1/.test(t) && /6/.test(t), '쪽 번호 글자를 읽지 못했어요');
+      return r[0].note;
+    }],
+    ['PDF 용량 줄이기 (스캔본)', async () => {
+      await setFiles([new File([pdfB], '스캔.pdf', { type: 'application/pdf' })]);
+      const s = await form('PDF 용량 줄이기');
+      need(results().length === 1 || /만든 파일이 없어요/.test(s), s);
+      return results().length ? results()[0].note : '이미 작아서 그대로 둠';
+    }],
+    ['ZIP 묶기 → 풀기', async () => {
+      await setFiles([await picture('ㄱ.jpg', 300, 200, '#E86E3C'), new File(['안녕하세요'], '메모.txt', { type: 'text/plain' })]);
+      click('ZIP으로 묶기'); await done();
+      let r = results(); need(r.length === 1 && starts(await bytes(r[0]), ZIP), status());
+      await setFiles([await asFile(r[0], 'application/zip')]);
+      click('압축 풀기'); await done();
+      r = results(); need(r.length === 2, '2개가 아니에요: ' + r.length);
+      return r.map((x) => x.name.split('/').pop()).join(', ');
+    }],
+    ['이름 한꺼번에 바꾸기', async () => {
+      await setFiles([new File(['a'], '나.txt'), new File(['b'], '가.txt'), new File(['c'], '다.txt')]);
+      await form('이름 한꺼번에 바꾸기', (e) => { e.base.value = '과제'; e.where.value = 'after'; e.start.value = '1'; e.order.value = 'name'; e.keep.checked = false; });
+      const r = results(); need(r.length === 3 && r[0].name === '과제_01.txt' && /가\.txt/.test(r[0].note), r.map((x) => x.name).join(', '));
+      return r.map((x) => x.name).join(', ');
+    }],
+  ];
+  const INFO = [
+    ['인터넷 없이 쓰기 (서비스 워커)', async () => ('serviceWorker' in navigator) ? ((await navigator.serviceWorker.getRegistration()) ? '켜져 있어요' : '아직 담기 전이에요 (툭을 한 번 열면 켜져요)') : '이 브라우저는 지원하지 않아요'],
+    ['공유하기', async () => { try { return navigator.canShare && navigator.canShare({ files: [new File(['a'], 'a.pdf', { type: 'application/pdf' })] }) ? '돼요' : '이 기기에서는 받기만 돼요'; } catch (_) { return '이 기기에서는 받기만 돼요'; } }],
+    ['앱으로 설치됨', async () => (matchMedia('(display-mode: standalone)').matches || navigator.standalone === true) ? '네' : '아니요 (브라우저로 열었어요)'],
+    ['화면', async () => innerWidth + '×' + innerHeight + ' · 배율 ' + devicePixelRatio + ' · ' + (matchMedia('(pointer: coarse)').matches ? '손가락' : '마우스')],
+  ];
+
+  function row(name) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td></td><td class="r wait">기다리는 중</td><td class="note"></td>';
+    tr.children[0].textContent = name;
+    rows.appendChild(tr);
+    return (state, text, note) => {
+      tr.children[1].className = 'r ' + state; tr.children[1].textContent = text; tr.children[2].textContent = note || '';
+    };
+  }
+
+  async function runAll() {
+    $('#go').disabled = true; $('#copy').hidden = true;
+    rows.innerHTML = ''; log.length = 0;
+    const setters = TESTS.map(([name]) => row(name));
+    const infoSet = INFO.map(([name]) => row(name));
+    let ok = 0, bad = 0;
+    sum.textContent = '툭 화면을 여는 중…';
+    try { await load(); } catch (e) { sum.textContent = '점검을 시작하지 못했어요: ' + e.message; $('#go').disabled = false; return; }
+    for (let i = 0; i < TESTS.length; i++) {
+      const [name, fn] = TESTS[i];
+      setters[i]('wait', '하는 중…');
+      sum.textContent = '점검하는 중… ' + (i + 1) + '/' + TESTS.length;
+      const t0 = performance.now();
+      try {
+        const note = await fn();
+        const sec = ((performance.now() - t0) / 1000).toFixed(1) + '초';
+        setters[i]('ok', '✓ 돼요', note + ' · ' + sec); ok++;
+        log.push('✓ ' + name + ' — ' + note + ' (' + sec + ')');
+      } catch (e) {
+        setters[i]('bad', '✗ 안 돼요', (e && e.message) || String(e)); bad++;
+        log.push('✗ ' + name + ' — ' + ((e && e.message) || e));
+      }
+    }
+    for (let i = 0; i < INFO.length; i++) {
+      let v; try { v = await INFO[i][1](); } catch (e) { v = '알 수 없음'; }
+      infoSet[i]('wait', '알림', v);
+      log.push('· ' + INFO[i][0] + ': ' + v);
+    }
+    sum.textContent = bad === 0 ? '모두 돼요 (' + ok + '개).' : ok + '개는 되고, ' + bad + '개가 안 돼요.';
+    sum.className = bad === 0 ? 'ok' : 'bad';
+    log.unshift('툭 점검: ' + sum.textContent, navigator.userAgent, new Date().toLocaleString('ko-KR'));
+    $('#go').disabled = false; $('#go').textContent = '다시 점검'; $('#copy').hidden = false;
+    window.__tukSelftest = { ok, bad, log: log.slice() };
+  }
+
+  $('#go').addEventListener('click', runAll);
+  $('#copy').addEventListener('click', async () => {
+    const text = log.join('\n');
+    try { await navigator.clipboard.writeText(text); $('#copy').textContent = '복사했어요'; }
+    catch (_) { window.prompt('아래 글을 복사해 주세요', text); }
+  });
+  if (/[?&]auto=1/.test(location.search)) runAll();
+})();
+</script>
+</body>
+</html>

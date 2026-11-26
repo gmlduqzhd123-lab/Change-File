@@ -208,6 +208,8 @@
     for (const [title, ids] of groups) {
       const g = document.createElement('div');
       g.className = 'act-group';
+      g.setAttribute('role', 'group');
+      g.setAttribute('aria-label', title);
       if (groups.length > 1) {
         const t = document.createElement('span');
         t.className = 'act-label';
@@ -284,6 +286,7 @@
     const a = li.querySelector('a');
     a.href = r.url;
     a.download = name.split('/').pop();
+    a.setAttribute('aria-label', name.split('/').pop() + ' 받기');
     resultsEl.appendChild(li);
     updateShare();
   }
@@ -896,7 +899,7 @@
         const i = start + k;
         if (progress) progress(i);
         // files: File 또는 {file, rot} (순서 정하기에서 돌린 사진)
-        const one = files[i] instanceof Blob ? { file: files[i], rot: 0 } : files[i];
+        const one = files[i] && files[i].file ? files[i] : { file: files[i], rot: 0 };
         const { bytes, w, h } = await toJpeg(one.file, per > 1 ? 2000 : 0, per > 1 ? 0.85 : 0.9, one.rot);
         let cx, cy, cw, ch;
         if (per === 1) {
@@ -951,6 +954,30 @@
       $('#verMeta').textContent = bits.join(' · ');
     })
     .catch(() => {});
+
+  // ── 화면 밝기: 자동(기기 설정) → 밝게 → 어둡게 ──
+  const themeBtn = $('#themeBtn');
+  const THEMES = [['', '자동'], ['light', '밝게'], ['dark', '어둡게']];
+  function showTheme() {
+    const cur = document.documentElement.getAttribute('data-theme') || '';
+    const label = (THEMES.find(([v]) => v === cur) || THEMES[0])[1];
+    themeBtn.innerHTML = '<span class="pre">화면: </span>' + label;
+    themeBtn.setAttribute('aria-label', '화면 밝기 바꾸기 (지금: ' + label + ')');
+    // 주소 표시줄 색도 맞춘다
+    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => {
+      const dark = cur ? cur === 'dark' : /dark/.test(m.media);
+      m.content = dark ? '#1B1916' : '#F6F3EE';
+    });
+  }
+  themeBtn.addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-theme') || '';
+    const next = THEMES[(THEMES.findIndex(([v]) => v === cur) + 1) % THEMES.length][0];
+    if (next) document.documentElement.setAttribute('data-theme', next);
+    else document.documentElement.removeAttribute('data-theme');
+    try { if (next) localStorage.setItem('tuk.theme', next); else localStorage.removeItem('tuk.theme'); } catch (_) { /* 무시 */ }
+    showTheme();
+  });
+  showTheme();
 
   // ── 앱으로 설치 · 인터넷 없이 쓰기 ──
   // 서비스 워커는 툭 화면과 라이브러리만 담아 둔다. 파일은 담지 않는다.

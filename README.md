@@ -69,3 +69,8 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 - 알림 창까지 시험: `Tuk.exe /run-ui <동작> 파일...` (메뉴를 건너뛰고 결과 알림을 띄움)
 - PowerShell에서는 창 프로그램이라 기다리지 않으므로 `Start-Process -Wait -PassThru`로 실행합니다.
 - 업데이트 시험: `TUK_UPDATE_BASE=http://127.0.0.1:포트/`를 정하고 `Tuk.exe /update-check` 또는 `/update-apply`
+
+## 점검
+
+[selftest.html](https://gmlduqzhd123-lab.github.io/Change-File/selftest.html)을 열고 **점검 시작**을 누르면 그 기기·브라우저에서 웹 기능 19가지가 되는지 스스로 확인합니다. 시험용 파일은 화면 안에서 만들고 어디로도 보내지 않습니다. 버전을 올리기 전에도 이 페이지로 전 기능을 확인합니다.
+
