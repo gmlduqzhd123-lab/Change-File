@@ -191,24 +191,47 @@
     if (toPngable > 0) choices.push(['topng', 'PNG로 바꾸기 (' + toPngable + '장)']);
     if (imgs > 0) choices.push(['shrink', '그림 용량 줄이기']);
     if (imgs > 0) choices.push(['imgwm', '그림에 워터마크']);
+    if (imgs > 0) choices.push(['trim', '여백 자르기']);
     if (items.length > 0) choices.push(['zip', 'ZIP으로 묶기']);
     if (items.length > 1) choices.push(['rename', '이름 한꺼번에 바꾸기']);
     if (items.length > 0 && items.every(isZip)) choices.push(['unzip', '압축 풀기']);
-    choices.forEach(([id, label], i) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'btn' + (i === 0 ? ' primary' : '');
-      b.textContent = label;
-      b.addEventListener('click', () => run(id));
-      if (id === 'shrink') {
-        actionsEl.appendChild(pair(b, '줄일 크기', SIZES, shrinkSide, (v) => { shrinkSide = v; remember('shrinkSide', v); }));
-      } else if (id === 'pdf') {
-        // 여백은 'PDF로'와 'PDF 하나로 묶기'에 함께 쓴다
-        actionsEl.appendChild(pair(b, 'PDF 여백', MARGINS, pdfMargin, (v) => { pdfMargin = v; remember('pdfMargin', v); }));
-      } else if (id === 'pdfall') {
-        actionsEl.appendChild(pair(b, '한 쪽에 몇 장', PER, pdfPer, (v) => { pdfPer = v; remember('pdfPer', v); }));
-      } else actionsEl.appendChild(b);
-    });
+    // 단추가 많아서 하는 일끼리 묶어 보여 준다. 맨 앞 단추가 가장 흔히 쓰는 일(주황색).
+    const GROUPS = [
+      ['PDF 만들기', ['pdf', 'pdfall', 'arrange', 'merge']],
+      ['PDF 손질', ['pages', 'extract', 'split', 'pagenum', 'wm', 'nup', 'fita4', 'squeeze']],
+      ['바꾸기', ['pdfjpg', 'pdftxt', 'tojpg', 'topng', 'shrink', 'trim', 'imgwm']],
+      ['파일', ['unzip', 'zip', 'rename']],
+    ];
+    const byId = new Map(choices);
+    const groups = GROUPS.map(([title, ids]) => [title, ids.filter((id) => byId.has(id))]).filter(([, ids]) => ids.length);
+    let first = true;
+    for (const [title, ids] of groups) {
+      const g = document.createElement('div');
+      g.className = 'act-group';
+      if (groups.length > 1) {
+        const t = document.createElement('span');
+        t.className = 'act-label';
+        t.textContent = title;
+        g.appendChild(t);
+      }
+      for (const id of ids) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn' + (first ? ' primary' : '');
+        first = false;
+        b.textContent = byId.get(id);
+        b.addEventListener('click', () => run(id));
+        if (id === 'shrink') {
+          g.appendChild(pair(b, '줄일 크기', SIZES, shrinkSide, (v) => { shrinkSide = v; remember('shrinkSide', v); }));
+        } else if (id === 'pdf') {
+          // 여백은 'PDF로'와 'PDF 하나로 묶기'에 함께 쓴다
+          g.appendChild(pair(b, 'PDF 여백', MARGINS, pdfMargin, (v) => { pdfMargin = v; remember('pdfMargin', v); }));
+        } else if (id === 'pdfall') {
+          g.appendChild(pair(b, '한 쪽에 몇 장', PER, pdfPer, (v) => { pdfPer = v; remember('pdfPer', v); }));
+        } else g.appendChild(b);
+      }
+      actionsEl.appendChild(g);
+    }
 
     const office = items.filter(isOffice).length;
     const notice = [];
@@ -555,6 +578,18 @@
           } catch (e) { problems.push(f.name + ': ' + why(e)); }
         }
         if (!png && list.some((x) => !isHeic(x))) notes.push('투명한 부분은 흰색이 돼요');
+      } else if (id === 'trim') {
+        let none = 0;
+        for (let i = 0; i < imgs.length; i++) {
+          const f = imgs[i].file;
+          setStatus('여백 자르는 중… ' + (i + 1) + '/' + imgs.length);
+          try {
+            const t = await trimImage(f);
+            if (!t) { none++; continue; }
+            addResult(stem(f.name) + '_자름.' + t.ext, t.blob, t.w0 + '×' + t.h0 + ' → ' + t.w + '×' + t.h);
+          } catch (e) { problems.push(f.name + ': ' + why(e)); }
+        }
+        if (none) notes.push(none === imgs.length ? '자를 여백이 없어요' : none + '장은 자를 여백이 없어서 건너뛰었어요');
       } else if (id === 'pdftxt') {
         for (const f of items.filter(isPdf).map((x) => x.file)) {
           try {
@@ -698,6 +733,55 @@
   }
 
   window.TukImage = { decode };
+
+  /**
+   * 여백 자르기: 네 귀퉁이와 같은 색(흰 바탕·검은 띠·투명)인 테두리를 잘라 낸다.
+   * 돌려주는 값: {blob, ext, w0, h0, w, h} 또는 null (자를 여백이 없을 때)
+   */
+  async function trimImage(file) {
+    const src = await decode(file);
+    let w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+    const k = Math.min(1, 8000 / Math.max(w, h));
+    w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(src, 0, 0, w, h);
+    if (src.close) src.close();
+    const d = g.getImageData(0, 0, w, h).data;
+    // 바탕색: 네 귀퉁이 중 가장 많이 겹치는 색
+    const px = (x, y) => { const i = (y * w + x) * 4; return [d[i], d[i + 1], d[i + 2], d[i + 3]]; };
+    const corners = [px(0, 0), px(w - 1, 0), px(0, h - 1), px(w - 1, h - 1)];
+    const near = (a, b) => (a[3] < 16 && b[3] < 16) || (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) <= 48 && Math.abs(a[3] - b[3]) <= 40);
+    let bg = corners[0], best = -1;
+    for (const a of corners) { const n = corners.filter((b) => near(a, b)).length; if (n > best) { best = n; bg = a; } }
+    const isBg = (i) => near(bg, [d[i], d[i + 1], d[i + 2], d[i + 3]]);
+    // 줄마다 바탕이 아닌 점이 조금이라도(티끌은 빼고) 있으면 내용
+    const rowHas = (y) => { let n = 0; const lim = Math.max(1, Math.floor(w * 0.002)); for (let x = 0; x < w; x++) if (!isBg((y * w + x) * 4) && ++n >= lim) return true; return false; };
+    const colHas = (x, y0, y1) => { let n = 0; const lim = Math.max(1, Math.floor((y1 - y0 + 1) * 0.002)); for (let y = y0; y <= y1; y++) if (!isBg((y * w + x) * 4) && ++n >= lim) return true; return false; };
+    let top = 0, bottom = h - 1, left = 0, right = w - 1;
+    while (top < h && !rowHas(top)) top++;
+    if (top >= h) { c.width = c.height = 0; return null; }   // 온통 바탕색
+    while (bottom > top && !rowHas(bottom)) bottom--;
+    while (left < w && !colHas(left, top, bottom)) left++;
+    while (right > left && !colHas(right, top, bottom)) right--;
+    const pad = Math.round(Math.min(w, h) * 0.01);
+    top = Math.max(0, top - pad); left = Math.max(0, left - pad);
+    bottom = Math.min(h - 1, bottom + pad); right = Math.min(w - 1, right + pad);
+    const cw = right - left + 1, ch = bottom - top + 1;
+    if (cw * ch >= w * h * 0.97) { c.width = c.height = 0; return null; }
+    // 사진(JPG·HEIC)은 JPG로, 그 밖에는 투명이 남게 PNG로
+    const photo = ['jpg', 'jpeg', 'heic', 'heif'].includes(ext(file.name));
+    const o = document.createElement('canvas');
+    o.width = cw; o.height = ch;
+    const og = o.getContext('2d');
+    if (photo) { og.fillStyle = '#fff'; og.fillRect(0, 0, cw, ch); }
+    og.drawImage(c, left, top, cw, ch, 0, 0, cw, ch);
+    c.width = c.height = 0;
+    const blob = await new Promise((res, rej) => o.toBlob((b) => (b ? res(b) : rej(new Error('그림을 만들지 못했어요'))), photo ? 'image/jpeg' : 'image/png', 0.92));
+    o.width = o.height = 0;
+    return { blob, ext: photo ? 'jpg' : 'png', w0: w, h0: h, w: cw, h: ch };
+  }
 
   /** 그림에 글씨 워터마크 → JPG (크기 그대로, 아주 큰 그림은 4000픽셀로 맞춤) */
   async function stampImage(file, o) {
