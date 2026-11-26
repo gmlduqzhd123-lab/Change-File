@@ -193,7 +193,7 @@ a { color: inherit; }
       g.fillStyle = '#ffffff'; g.beginPath(); q.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.fill();
       const photo = await new Promise((res) => c.toBlob((b) => res(new File([b], '비스듬.png', { type: 'image/png' })), 'image/png'));
       await setFiles([photo]); click('반듯하게 자르기');
-      for (let i = 0; i < 100 && !(doc.querySelector('#pages .crop-pt') && /네 귀퉁이를 맞추고/.test(status())); i++) await sleep(100);
+      for (let i = 0; i < 100 && !(doc.querySelector('#pages .crop-pt') && /이대로 자르기/.test(status())); i++) await sleep(100);
       need(doc.querySelectorAll('#pages .crop-pt').length === 4, '편집 화면이 열리지 않았어요');
       // 손잡이를 끌어 본다 (첫 모서리를 종이 귀퉁이로)
       const stage = doc.querySelector('#pages .crop-stage canvas').getBoundingClientRect();
@@ -218,6 +218,33 @@ a { color: inherit; }
       need(corners.every((v) => v > 230), '귀퉁이가 종이(흰색)가 아니에요: ' + corners.join(', '));
       need(Math.abs(bmp.width - 960) < 40 && Math.abs(bmp.height - 610) < 40, '크기가 이상해요: ' + bmp.width + '×' + bmp.height);
       return bmp.width + '×' + bmp.height + ' · 네 귀퉁이 밝기 ' + corners.join('·');
+    }],
+    ['귀퉁이 저절로 찾기 · 돌리기', async () => {
+      const c = document.createElement('canvas'); c.width = 1200; c.height = 900;
+      const g = c.getContext('2d');
+      g.fillStyle = '#4a4038'; g.fillRect(0, 0, 1200, 900);
+      const q = [[260, 120], [1040, 200], [1100, 800], [140, 720]];
+      g.fillStyle = '#f4efe2'; g.beginPath(); q.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.fill();
+      g.fillStyle = '#222'; g.font = 'bold 46px sans-serif';
+      for (let i = 0; i < 5; i++) g.fillText('학부모님께 알려 드립니다 ' + i, 330, 290 + i * 90);
+      const photo = await new Promise((res) => c.toBlob((b) => res(new File([b], '자동.jpg', { type: 'image/jpeg' })), 'image/jpeg', 0.9));
+      await setFiles([photo]); click('반듯하게 자르기');
+      for (let i = 0; i < 100 && !(doc.querySelector('#pages .crop-pt') && /이대로 자르기/.test(status())); i++) await sleep(100);
+      need(/저절로 잡았어요/.test(status()), '귀퉁이를 찾지 못했어요: ' + status());
+      const at = () => [...doc.querySelectorAll('#pages .crop-pt')].map((h) => [parseFloat(h.style.left), parseFloat(h.style.top)]);
+      const off = Math.max(...at().map(([x, y], i) => Math.max(Math.abs(x - q[i][0] / 12), Math.abs(y - q[i][1] / 9))));
+      need(off < 3, '귀퉁이가 ' + off.toFixed(1) + '% 어긋났어요');
+      // 돌리기: 그림이 세로로 바뀌고 귀퉁이를 다시 찾는다
+      [...doc.querySelectorAll('#pages button')].find((b) => b.textContent === '돌리기').click(); await sleep(300);
+      const cv = doc.querySelector('#pages .crop-stage canvas');
+      need(cv.width === 900 && cv.height === 1200, '돌린 크기가 이상해요: ' + cv.width + '×' + cv.height);
+      const cb = doc.querySelector('#pages input[name=scan]'); if (cb.checked) cb.click();
+      [...doc.querySelectorAll('#pages button')].find((b) => b.textContent === '이대로 자르기').click();
+      for (let i = 0; i < 100 && results().length === 0; i++) await sleep(150);
+      const r = results(); need(r.length === 1, status());
+      const bmp = await createImageBitmap(await (await fetch(r[0].url)).blob());
+      need(bmp.height > bmp.width && Math.abs(bmp.height - 960) < 60 && Math.abs(bmp.width - 610) < 60, '돌린 결과 크기가 이상해요: ' + bmp.width + '×' + bmp.height);
+      return '어긋남 ' + off.toFixed(1) + '% · 돌린 결과 ' + bmp.width + '×' + bmp.height;
     }],
     ['여백 자르기', async () => {
       await setFiles([await picture('캡처.png', 900, 700, '#3C8CE8')]);
