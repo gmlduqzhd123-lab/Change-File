@@ -178,6 +178,7 @@
     if (pdfs > 0) choices.push(['split', '쪽마다 나누기']);
     if (pdfs > 0) choices.push(['pdfjpg', 'PDF → JPG 그림']);
     if (pdfs > 0) choices.push(['nup', '모아 찍기 (한 장에 2·4쪽)']);
+    if (pdfs > 0) choices.push(['pdftxt', '글자 뽑기 (TXT)']);
     if (imgs > 0) choices.push(['pdf', imgs > 1 ? '그림마다 PDF로' : 'PDF로']);
     if (imgs > 1) choices.push(['pdfall', 'PDF 하나로 묶기 (' + imgs + '장)']);
     if (imgs > 1) choices.push(['arrange', '순서 정해서 묶기']);
@@ -188,6 +189,7 @@
     if (toPngable > 0) choices.push(['topng', 'PNG로 바꾸기 (' + toPngable + '장)']);
     if (imgs > 0) choices.push(['shrink', '그림 용량 줄이기']);
     if (items.length > 0) choices.push(['zip', 'ZIP으로 묶기']);
+    if (items.length > 1) choices.push(['rename', '이름 한꺼번에 바꾸기']);
     if (items.length > 0 && items.every(isZip)) choices.push(['unzip', '압축 풀기']);
     choices.forEach(([id, label], i) => {
       const b = document.createElement('button');
@@ -368,6 +370,24 @@
       read: (f) => ({ per: Number(f.per.value) === 4 ? 4 : 2, border: f.border.checked }),
       run: (files, o) => window.TukPdf.nup(files, o, setStatus),
     },
+    rename: {
+      title: '이름 한꺼번에 바꾸기',
+      all: true,
+      submit: '이름 바꾸기',
+      html:
+        '<label class="wide">이름 <input name="base" type="text" maxlength="40" value="과제" placeholder="예: 3학년 2반 과제"></label>' +
+        '<label>번호 자리 <select name="where"><option value="after">뒤에 (과제_01)</option><option value="before">앞에 (01_과제)</option></select></label>' +
+        '<label>시작 번호 <input name="start" type="number" min="0" max="99999" value="1" inputmode="numeric"></label>' +
+        '<label>순서 <select name="order"><option value="name">이름 순서 (1, 2, 10…)</option><option value="date">만든 날짜 순서</option><option value="given">놓은 순서</option></select></label>' +
+        '<label class="check"><input name="keep" type="checkbox"> 원래 이름도 뒤에 남기기</label>' +
+        '<p class="opts-note" data-preview></p>',
+      read: (f) => ({ base: f.base.value.trim(), where: f.where.value, start: Math.max(0, Math.min(99999, parseInt(f.start.value, 10) || 0)), order: f.order.value, keep: f.keep.checked }),
+      preview: (o) => {
+        const list = renamed(items, o);
+        return '원본은 그대로 두고, 바꾼 이름의 사본을 만들어요. 예: ' + list.slice(0, 3).map((x) => x.name).join(' · ') + (list.length > 3 ? ' …' : '');
+      },
+      run: async (files, o) => renamed(items, o).map((x) => ({ name: x.name, blob: x.file, note: '원래: ' + x.file.name })),
+    },
     squeeze: {
       title: 'PDF 용량 줄이기 (스캔본)',
       submit: '줄이기',
@@ -378,6 +398,23 @@
       run: (files, o) => window.TukPdf.squeeze(files, { s: { dpi: 100, quality: 0.6 }, m: { dpi: 150, quality: 0.7 }, l: { dpi: 200, quality: 0.8 } }[o.level] || { dpi: 150, quality: 0.7 }, setStatus),
     },
   };
+  /** 이름 한꺼번에 바꾸기: 순서대로 번호를 붙인 새 이름 */
+  function renamed(list, o) {
+    const clean = (t) => t.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim();
+    const base = clean(o.base || '');
+    const sorted = [...list];
+    if (o.order === 'name') sorted.sort((a, b) => a.path.localeCompare(b.path, 'ko', { numeric: true, sensitivity: 'base' }));
+    else if (o.order === 'date') sorted.sort((a, b) => (a.file.lastModified || 0) - (b.file.lastModified || 0));
+    const digits = Math.max(2, String(o.start + sorted.length - 1).length);
+    return sorted.map((it, i) => {
+      const num = String(o.start + i).padStart(digits, '0');
+      const e = ext(it.file.name);
+      let nm = base ? (o.where === 'before' ? num + '_' + base : base + '_' + num) : num;
+      if (o.keep) nm += '_' + clean(stem(it.file.name));
+      return { file: it.file, name: nm + (e ? '.' + e : '') };
+    });
+  }
+
   // 고른 값은 이 브라우저에만 기억한다
   function remember(k, v) { try { localStorage.setItem('tuk.' + k, JSON.stringify(v)); } catch (_) { /* 무시 */ } }
   const recall = (k) => { try { return JSON.parse(localStorage.getItem('tuk.' + k) || 'null'); } catch (_) { return null; } };
@@ -386,7 +423,7 @@
     const def = FORMS[id];
     optsEl.hidden = false;
     optsEl.innerHTML = '<form class="opts-form"><b class="opts-title"></b><div class="opts-fields">' + def.html + '</div>' +
-      '<div class="bar"><button class="btn primary" type="submit">PDF ' + items.filter(isPdf).length + '개' + (def.submit ? ' ' + def.submit : '에 넣기') + '</button>' +
+      '<div class="bar"><button class="btn primary" type="submit">' + (def.all ? '파일 ' + items.length : 'PDF ' + items.filter(isPdf).length) + '개' + (def.submit ? ' ' + def.submit : '에 넣기') + '</button>' +
       '<button class="btn small" type="button" data-act="close">닫기</button></div></form>';
     const form = optsEl.querySelector('form');
     optsEl.querySelector('.opts-title').textContent = def.title;
@@ -398,6 +435,13 @@
       else el.value = typeof v === 'boolean' ? (v ? '1' : '0') : String(v);
     }
     form.querySelector('[data-act="close"]').addEventListener('click', closeOptions);
+    const pv = form.querySelector('[data-preview]');
+    if (pv && def.preview) {
+      const show = () => { pv.textContent = def.preview(def.read(form.elements)); };
+      form.addEventListener('input', show);
+      form.addEventListener('change', show);
+      show();
+    }
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (busy) return;
@@ -408,14 +452,17 @@
       form.querySelectorAll('button').forEach((b) => (b.disabled = true));
       clearResults();
       const problems = [], notes = [];
-      for (const it of items.filter(isPdf)) {
+      // all: 모든 파일을 한 번에 (이름 바꾸기) · 아니면 PDF 하나씩
+      const batches = def.all ? [items.map((x) => x.file)] : items.filter(isPdf).map((it) => [it.file]);
+      for (const batch of batches) {
         try {
-          for (const r of await def.run([it.file], o)) {
+          for (const r of await def.run(batch, o)) {
             if (r.message) notes.push(r.message);
             else addResult(r.name, r.blob, r.note);
           }
         } catch (err) { problems.push(why(err)); }
       }
+      if (def.all && results.length > 1) notes.push('아래 \'결과를 ZIP 하나로 받기\'로 한 번에 받을 수 있어요');
       busy = false;
       form.querySelectorAll('button').forEach((b) => (b.disabled = false));
       const head = results.length ? (problems.length ? '일부만 됐어요. ' : '다 됐어요. ') + results.length + '개를 만들었어요.' : '만든 파일이 없어요.';
@@ -465,6 +512,15 @@
           } catch (e) { problems.push(f.name + ': ' + why(e)); }
         }
         if (!png && list.some((x) => !isHeic(x))) notes.push('투명한 부분은 흰색이 돼요');
+      } else if (id === 'pdftxt') {
+        for (const f of items.filter(isPdf).map((x) => x.file)) {
+          try {
+            for (const r of await window.TukPdf.toText([f], setStatus)) {
+              if (r.message) notes.push(r.message);
+              else addResult(r.name, r.blob, r.note);
+            }
+          } catch (e) { problems.push(why(e)); }
+        }
       } else if (id === 'split' || id === 'pdfjpg') {
         const pdfFiles = items.filter(isPdf).map((x) => x.file);
         // PDF 하나가 망가져도 나머지는 계속한다

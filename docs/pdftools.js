@@ -140,6 +140,53 @@
   }
 
   /**
+   * PDF 글자 뽑기 → TXT (메모장·한글에서 바로 열리게 UTF-8 BOM). 글자가 없는 스캔본은 {message}.
+   */
+  async function toText(files, status) {
+    await needPdfJs();
+    const out = [];
+    for (const f of [...files].sort(byName)) {
+      let view;
+      try { view = await window.pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), isEvalSupported: false }).promise; }
+      catch (e) {
+        if (e && e.name === 'PasswordException') throw new Error(f.name + ': 암호가 걸린 PDF라서 열 수 없어요');
+        throw new Error(f.name + ': PDF가 손상됐거나 읽을 수 없어요');
+      }
+      try {
+        const n = view.numPages;
+        if (n > MAX_PAGES) throw new Error(f.name + ': 쪽이 너무 많아요 (' + MAX_PAGES + '쪽까지)');
+        const parts = [];
+        let chars = 0, empty = 0;
+        for (let i = 1; i <= n; i++) {
+          status(f.name + ' 글자 뽑는 중… ' + i + '/' + n);
+          const page = await view.getPage(i);
+          const tc = await page.getTextContent();
+          // 글자 조각을 줄 단위로 잇는다 (hasEOL이 줄 끝, 같은 줄의 띄어진 조각은 한 칸 띄움)
+          let text = '', lastY = null, lastEnd = null;
+          for (const it of tc.items) {
+            if (typeof it.str !== 'string') continue;
+            const y = it.transform ? it.transform[5] : null, x = it.transform ? it.transform[4] : null;
+            if (lastY !== null && y !== null && Math.abs(y - lastY) > Math.max(2, (it.height || 10) * 0.5) && !text.endsWith('\n')) text += '\n';
+            else if (lastEnd !== null && x !== null && x - lastEnd > (it.height || 10) * 0.25 && !/\s$/.test(text) && it.str && !/^\s/.test(it.str)) text += ' ';
+            text += it.str;
+            if (it.hasEOL && !text.endsWith('\n')) text += '\n';
+            lastY = y; lastEnd = x !== null ? x + (it.width || 0) : null;
+          }
+          text = text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+          page.cleanup();
+          chars += text.replace(/\s/g, '').length;
+          if (!text) empty++;
+          parts.push((n > 1 ? '── ' + i + '쪽 ──\n' : '') + (text || '(글자 없음)'));
+        }
+        if (chars === 0) { out.push({ message: f.name + '은(는) 글자가 없는 스캔본이에요 (글자를 읽으려면 OCR 프로그램이 필요해요)' }); continue; }
+        const blob = new Blob(['\ufeff' + parts.join('\n\n') + '\n'], { type: 'text/plain;charset=utf-8' });
+        out.push({ name: stem(f.name) + '.txt', blob, note: n + '쪽 · 글자 ' + chars.toLocaleString('ko-KR') + '자' + (empty ? ' · 글자 없는 쪽 ' + empty + '개' : '') });
+      } finally { view.destroy(); }
+    }
+    return out;
+  }
+
+  /**
    * 스캔한 PDF 용량 줄이기: 글자가 없는(그림뿐인) 쪽만 낮은 해상도 JPG로 다시 그린다.
    * 글자가 있는 쪽은 그대로 옮겨서 글자 고르기·검색이 그대로 된다.
    * @param {{dpi: number, quality: number}} o
@@ -569,5 +616,5 @@
     return out;
   }
 
-  window.TukPdf = { merge, edit, split, toJpg, pageNumbers, watermark, squeeze, nup };
+  window.TukPdf = { merge, edit, split, toJpg, toText, pageNumbers, watermark, squeeze, nup };
 })();
