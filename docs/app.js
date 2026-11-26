@@ -174,6 +174,8 @@
     if (pdfs > 0) choices.push(['pages', pdfs > 1 ? '쪽 고르기·돌리기 (합쳐서)' : '쪽 빼기·돌리기·순서']);
     if (pdfs > 0) choices.push(['pagenum', '쪽 번호 넣기']);
     if (pdfs > 0) choices.push(['wm', '워터마크 넣기']);
+    if (pdfs > 0) choices.push(['extract', '쪽 뽑기 (1-3, 5…)']);
+    if (pdfs > 0) choices.push(['fita4', 'A4로 맞추기']);
     if (pdfs > 0) choices.push(['squeeze', 'PDF 용량 줄이기 (스캔본)']);
     if (pdfs > 0) choices.push(['split', '쪽마다 나누기']);
     if (pdfs > 0) choices.push(['pdfjpg', 'PDF → JPG 그림']);
@@ -188,6 +190,7 @@
     if (notJpg > 0) choices.push(['tojpg', 'JPG로 바꾸기 (' + notJpg + '장)']);
     if (toPngable > 0) choices.push(['topng', 'PNG로 바꾸기 (' + toPngable + '장)']);
     if (imgs > 0) choices.push(['shrink', '그림 용량 줄이기']);
+    if (imgs > 0) choices.push(['imgwm', '그림에 워터마크']);
     if (items.length > 0) choices.push(['zip', 'ZIP으로 묶기']);
     if (items.length > 1) choices.push(['rename', '이름 한꺼번에 바꾸기']);
     if (items.length > 0 && items.every(isZip)) choices.push(['unzip', '압축 풀기']);
@@ -370,6 +373,44 @@
       read: (f) => ({ per: Number(f.per.value) === 4 ? 4 : 2, border: f.border.checked }),
       run: (files, o) => window.TukPdf.nup(files, o, setStatus),
     },
+    extract: {
+      title: '쪽 뽑기',
+      submit: '쪽 뽑기',
+      html:
+        '<label class="wide">뽑을 쪽 <input name="range" type="text" maxlength="200" value="1-3" placeholder="예: 1-3, 5, 8-끝" required></label>' +
+        '<label>만들기 <select name="each"><option value="0">PDF 하나로</option><option value="1">쪽마다 따로</option></select></label>' +
+        '<p class="opts-note">쉼표로 여러 개, 줄표로 범위를 적어요. \'8-끝\'은 8쪽부터 마지막 쪽까지예요. 적은 순서대로 담아요.</p>',
+      read: (f) => ({ range: f.range.value.trim(), each: f.each.value === '1' }),
+      run: (files, o) => window.TukPdf.extract(files, o, setStatus),
+    },
+    fita4: {
+      title: 'A4로 맞추기',
+      submit: 'A4로 맞추기',
+      html:
+        '<label>여백 <select name="margin"><option value="0">여백 없이</option><option value="20">여백 조금</option></select></label>' +
+        '<p class="opts-note">크기가 제각각인 PDF(스캔본·영수증·외국 서류 등)의 쪽을 모두 A4에 맞춰요. 가로로 긴 쪽은 가로 A4로 놓아요.</p>',
+      read: (f) => ({ margin: Number(f.margin.value) || 0 }),
+      run: (files, o) => window.TukPdf.fitA4(files, o, setStatus),
+    },
+    imgwm: {
+      title: '그림에 워터마크',
+      target: 'img',
+      html:
+        '<label class="wide">글씨 <input name="text" type="text" maxlength="40" value="외부 유출 금지" required></label>' +
+        '<label>진하기 <select name="alpha"><option value="0.2">연하게</option><option value="0.32" selected>보통</option><option value="0.5">진하게</option></select></label>' +
+        '<label>방향 <select name="diagonal"><option value="1">대각선</option><option value="0">가로</option></select></label>' +
+        '<label class="check"><input name="tile" type="checkbox"> 여러 번 반복해서 (잘라 쓰기 어렵게)</label>',
+      read: (f) => ({ text: f.text.value.trim(), alpha: Number(f.alpha.value), diagonal: f.diagonal.value === '1', tile: f.tile.checked }),
+      run: async (files, o) => {
+        const out = [];
+        for (let i = 0; i < files.length; i++) {
+          setStatus('워터마크 넣는 중… ' + (i + 1) + '/' + files.length);
+          const blob = await stampImage(files[i], o);
+          out.push({ name: stem(files[i].name) + '_워터마크.jpg', blob, note: size(blob.size) });
+        }
+        return out;
+      },
+    },
     rename: {
       title: '이름 한꺼번에 바꾸기',
       all: true,
@@ -423,7 +464,7 @@
     const def = FORMS[id];
     optsEl.hidden = false;
     optsEl.innerHTML = '<form class="opts-form"><b class="opts-title"></b><div class="opts-fields">' + def.html + '</div>' +
-      '<div class="bar"><button class="btn primary" type="submit">' + (def.all ? '파일 ' + items.length : 'PDF ' + items.filter(isPdf).length) + '개' + (def.submit ? ' ' + def.submit : '에 넣기') + '</button>' +
+      '<div class="bar"><button class="btn primary" type="submit">' + (def.all ? '파일 ' + items.length + '개' : def.target === 'img' ? '그림 ' + items.filter(isImg).length + '장' : 'PDF ' + items.filter(isPdf).length + '개') + (def.submit ? ' ' + def.submit : '에 넣기') + '</button>' +
       '<button class="btn small" type="button" data-act="close">닫기</button></div></form>';
     const form = optsEl.querySelector('form');
     optsEl.querySelector('.opts-title').textContent = def.title;
@@ -446,14 +487,16 @@
       e.preventDefault();
       if (busy) return;
       const o = def.read(form.elements);
-      if (id === 'wm' && !o.text) { setStatus('워터마크 글씨를 적어 주세요', true); return; }
+      if ((id === 'wm' || id === 'imgwm') && !o.text) { setStatus('워터마크 글씨를 적어 주세요', true); return; }
+      if (id === 'extract' && !o.range) { setStatus('뽑을 쪽을 적어 주세요 (예: 1-3, 5)', true); return; }
       remember(id, o);
       busy = true;
       form.querySelectorAll('button').forEach((b) => (b.disabled = true));
       clearResults();
       const problems = [], notes = [];
       // all: 모든 파일을 한 번에 (이름 바꾸기) · 아니면 PDF 하나씩
-      const batches = def.all ? [items.map((x) => x.file)] : items.filter(isPdf).map((it) => [it.file]);
+      // all: 모든 파일을 한 번에 (이름 바꾸기) · img: 그림을 한 번에 · 아니면 PDF 하나씩
+      const batches = def.all ? [items.map((x) => x.file)] : def.target === 'img' ? [items.filter(isImg).map((x) => x.file)] : items.filter(isPdf).map((it) => [it.file]);
       for (const batch of batches) {
         try {
           for (const r of await def.run(batch, o)) {
@@ -655,6 +698,50 @@
   }
 
   window.TukImage = { decode };
+
+  /** 그림에 글씨 워터마크 → JPG (크기 그대로, 아주 큰 그림은 4000픽셀로 맞춤) */
+  async function stampImage(file, o) {
+    const src = await decode(file);
+    let w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+    const k = Math.min(1, 4000 / Math.max(w, h));
+    w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+    g.drawImage(src, 0, 0, w, h);
+    if (src.close) src.close();
+    const angle = o.diagonal ? -Math.atan2(h, w) : 0;
+    const span = o.tile ? Math.max(w, h) * 0.35 : (o.diagonal ? Math.hypot(w, h) * 0.7 : w * 0.8);
+    // 글씨 크기는 너비가 span이 되게
+    let px = 100;
+    const fontOf = (n) => 'bold ' + n + 'px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+    g.font = fontOf(px);
+    px = Math.max(10, Math.min(px * span / Math.max(1, g.measureText(o.text).width), o.tile ? h / 6 : h * 0.3));
+    g.font = fontOf(px);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    // 밝은 곳·어두운 곳 어디서나 보이게 회색 글씨에 흰 테두리
+    g.fillStyle = 'rgba(90, 90, 90, ' + o.alpha + ')';
+    g.strokeStyle = 'rgba(255, 255, 255, ' + o.alpha * 0.8 + ')';
+    g.lineWidth = Math.max(1, px / 25);
+    const stamp = (x, y) => {
+      g.save(); g.translate(x, y); g.rotate(angle);
+      g.strokeText(o.text, 0, 0); g.fillText(o.text, 0, 0);
+      g.restore();
+    };
+    if (o.tile) {
+      const tw = g.measureText(o.text).width + px * 2, th = px * 3.2;
+      const R = Math.hypot(w, h);
+      g.save(); g.translate(w / 2, h / 2); g.rotate(angle);
+      for (let y = -R; y <= R; y += th) for (let x = -R + ((Math.round(y / th) % 2) ? tw / 2 : 0); x <= R; x += tw) {
+        g.strokeText(o.text, x, y); g.fillText(o.text, x, y);
+      }
+      g.restore();
+    } else stamp(w / 2, h / 2);
+    const blob = await new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('그림을 만들지 못했어요'))), 'image/jpeg', 0.92));
+    c.width = c.height = 0;
+    return blob;
+  }
 
   /** 투명한 곳은 그대로 두고 PNG로 (크기 그대로, 아주 큰 그림은 8000픽셀로 맞춤) */
   async function toPng(file) {

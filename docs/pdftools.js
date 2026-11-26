@@ -574,12 +574,111 @@
   }
 
   /**
+   * 쪽(embedPage)을 칸(cx, cy, cw, ch) 가운데에 비율대로 맞춰 그린다. 돌려 둔 쪽(/Rotate r)은 보이는 방향대로.
+   * 돌려주는 값: 그려진 자리 {x, y, w, h}
+   */
+  function drawFit(sheet, emb, r, cx, cy, cw, ch) {
+    const { degrees } = window.PDFLib;
+    const vw = r % 180 ? emb.height : emb.width, vh = r % 180 ? emb.width : emb.height;
+    const s = Math.min(cw / vw, ch / vh), dw = vw * s, dh = vh * s;
+    const x0 = cx + (cw - dw) / 2, y0 = cy + (ch - dh) / 2;
+    let x = x0, y = y0, turn = 0;
+    if (r === 90) { y = y0 + dh; turn = -90; }
+    else if (r === 180) { x = x0 + dw; y = y0 + dh; turn = 180; }
+    else if (r === 270) { x = x0 + dw; turn = 90; }
+    sheet.drawPage(emb, { x, y, xScale: s, yScale: s, rotate: degrees(turn) });
+    return { x: x0, y: y0, w: dw, h: dh };
+  }
+
+  /**
+   * 쪽 범위 읽기: "1-3, 5, 8-끝" → [0, 1, 2, 4, 7, …] (적은 순서대로, 겹치면 한 번만)
+   */
+  function parseRange(text, n) {
+    const out = [], seen = new Set();
+    const num = (t) => {
+      t = t.trim();
+      if (t === '') return null;
+      if (/^(끝|마지막|end)$/i.test(t)) return n;
+      if (!/^\d+$/.test(t)) throw new Error('쪽 번호를 알아볼 수 없어요: ' + t);
+      return parseInt(t, 10);
+    };
+    const tokens = String(text || '').replace(/[~〜–—]/g, '-').split(/[,\s，、]+/).filter(Boolean);
+    if (!tokens.length) throw new Error('뽑을 쪽을 적어 주세요 (예: 1-3, 5)');
+    for (const tk of tokens) {
+      let a, b;
+      if (tk.includes('-')) {
+        const [l, r] = tk.split('-');
+        a = num(l); b = num(r);
+        if (a === null) a = 1;
+        if (b === null) b = n;
+      } else a = b = num(tk);
+      if (a < 1 || b < 1) throw new Error('쪽 번호는 1부터예요');
+      if (a > n) throw new Error('이 PDF는 ' + n + '쪽까지만 있어요 (' + tk + ')');
+      b = Math.min(b, n);
+      const step = a <= b ? 1 : -1;
+      for (let i = a; step > 0 ? i <= b : i >= b; i += step) if (!seen.has(i)) { seen.add(i); out.push(i - 1); }
+    }
+    return out;
+  }
+
+  /** 쪽 뽑기: o.range ("1-3, 5"), o.each (쪽마다 따로) */
+  async function extract(files, o, status) {
+    await needPdfLib();
+    const out = [];
+    for (const f of [...files].sort(byName)) {
+      status(f.name + ' 쪽 뽑는 중…');
+      const s = await openPdf(f);
+      const n = s.doc.getPageCount();
+      let pages;
+      try { pages = parseRange(o.range, n); } catch (e) { throw new Error(f.name + ': ' + e.message); }
+      if (o.each) {
+        for (const page of pages) out.push({ name: stem(f.name) + '_' + pad(page + 1, n) + '쪽.pdf', blob: await build([s], [{ src: 0, page, rot: 0 }]) });
+      } else {
+        const label = String(o.range).replace(/\s+/g, '').replace(/[\\/:*?"<>|]/g, '').replace(/,/g, '_').slice(0, 30);
+        const blob = await build([s], pages.map((page) => ({ src: 0, page, rot: 0 })));
+        out.push({ name: stem(f.name) + '_' + label + '쪽.pdf', blob, note: n + '쪽 중 ' + pages.length + '쪽' });
+      }
+    }
+    return out;
+  }
+
+  /** A4로 맞추기: 쪽마다 보이는 방향에 맞춰 세로·가로 A4 가운데에 비율대로. o.margin (포인트) */
+  async function fitA4(files, o, status) {
+    await needPdfLib();
+    const { PDFDocument } = window.PDFLib;
+    const out = [];
+    for (const f of [...files].sort(byName)) {
+      status(f.name + ' A4로 맞추는 중…');
+      const { doc: src } = await openPdf(f);
+      const dst = await PDFDocument.create();
+      const pages = src.getPages();
+      let changed = 0;
+      for (const p of pages) {
+        const b = p.getCropBox();
+        const r = ((p.getRotation().angle % 360) + 360) % 360;
+        const vw = r % 180 ? b.height : b.width, vh = r % 180 ? b.width : b.height;
+        const land = vw > vh;
+        const PW = land ? 841.89 : 595.28, PH = land ? 595.28 : 841.89;
+        if (Math.abs(vw - PW) > 2 || Math.abs(vh - PH) > 2 || o.margin > 0) changed++;
+        const sheet = dst.addPage([PW, PH]);
+        const emb = await dst.embedPage(p, { left: b.x, bottom: b.y, right: b.x + b.width, top: b.y + b.height });
+        const M = o.margin || 0;
+        drawFit(sheet, emb, r, M, M, PW - 2 * M, PH - 2 * M);
+      }
+      if (!changed) { out.push({ message: f.name + '은(는) 이미 모든 쪽이 A4예요' }); continue; }
+      const blob = new Blob([await dst.save()], { type: 'application/pdf' });
+      out.push({ name: stem(f.name) + '_A4.pdf', blob, note: pages.length + '쪽 · 크기 다른 쪽 ' + changed + '개 맞춤' });
+    }
+    return out;
+  }
+
+  /**
    * 모아 찍기: 원래 쪽 2개(가로 A4에 나란히) 또는 4개(세로 A4에 2×2)를 한 장에
    * @param {{per: 2|4, border: boolean}} o
    */
   async function nup(files, o, status) {
     await needPdfLib();
-    const { PDFDocument, degrees, rgb } = window.PDFLib;
+    const { PDFDocument, rgb } = window.PDFLib;
     const per = o.per === 4 ? 4 : 2;
     const PW = per === 2 ? 841.89 : 595.28, PH = per === 2 ? 595.28 : 841.89;
     const cols = 2, rows = per === 2 ? 1 : 2, M = 18, G = 12;
@@ -597,18 +696,9 @@
         const b = p.getCropBox();
         const r = ((p.getRotation().angle % 360) + 360) % 360;
         const emb = await dst.embedPage(p, { left: b.x, bottom: b.y, right: b.x + b.width, top: b.y + b.height });
-        // 돌려 둔 쪽(/Rotate)은 보이는 방향대로 놓는다
-        const vw = r % 180 ? emb.height : emb.width, vh = r % 180 ? emb.width : emb.height;
-        const s = Math.min(cw / vw, ch / vh), dw = vw * s, dh = vh * s;
         const k = i % per, col = k % cols, row = Math.floor(k / cols);
-        const cx = M + col * (cw + G) + (cw - dw) / 2;
-        const cy = PH - M - (row + 1) * ch - row * G + (ch - dh) / 2;
-        let x = cx, y = cy, turn = 0;
-        if (r === 90) { y = cy + dh; turn = -90; }
-        else if (r === 180) { x = cx + dw; y = cy + dh; turn = 180; }
-        else if (r === 270) { x = cx + dw; turn = 90; }
-        sheet.drawPage(emb, { x, y, xScale: s, yScale: s, rotate: degrees(turn) });
-        if (o.border) sheet.drawRectangle({ x: cx, y: cy, width: dw, height: dh, borderColor: rgb(0.6, 0.6, 0.6), borderWidth: 0.5 });
+        const at = drawFit(sheet, emb, r, M + col * (cw + G), PH - M - (row + 1) * ch - row * G, cw, ch);
+        if (o.border) sheet.drawRectangle({ x: at.x, y: at.y, width: at.w, height: at.h, borderColor: rgb(0.6, 0.6, 0.6), borderWidth: 0.5 });
       }
       const blob = new Blob([await dst.save()], { type: 'application/pdf' });
       out.push({ name: stem(f.name) + '_모아찍기.pdf', blob, note: pages.length + '쪽 → ' + dst.getPageCount() + '장 · ' + (blob.size >= 1048576 ? (blob.size / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(blob.size / 1024)) + 'KB') });
@@ -616,5 +706,5 @@
     return out;
   }
 
-  window.TukPdf = { merge, edit, split, toJpg, toText, pageNumbers, watermark, squeeze, nup };
+  window.TukPdf = { merge, edit, split, toJpg, toText, pageNumbers, watermark, squeeze, nup, extract, fitA4, parseRange };
 })();
