@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>툭 — 툭 놓으면 끝 | 무료 PDF·용량 줄이기·압축</title>
-<meta name="description" content="파일을 툭 놓으면 PDF로 바꾸고, 그림 용량을 줄이고, ZIP으로 묶거나 풀어요. 웹에서 바로 쓰거나 윈도우 프로그램으로 한글·오피스 문서까지. 파일은 내 컴퓨터 밖으로 나가지 않아요.">
+<title>툭 — 툭 놓으면 끝 | 무료 PDF 변환·합치기·용량 줄이기·압축</title>
+<meta name="description" content="파일을 툭 놓으면 PDF로 바꾸고, PDF를 합치거나 쪽을 빼고 돌리고, 그림 용량을 줄이고, ZIP으로 묶거나 풀어요. 웹에서 바로 쓰거나 윈도우 프로그램으로 한글·오피스 문서까지. 파일은 내 컴퓨터 밖으로 나가지 않아요.">
 <meta name="theme-color" content="#F6F3EE">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23E86E3C'/%3E%3Ctext x='16' y='23' font-size='18' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%ED%88%AD%3C/text%3E%3C/svg%3E">
 <style>
@@ -82,6 +82,40 @@ section .lead { color: var(--muted); margin: 0 0 24px; }
 .pair { display: inline-flex; align-items: stretch; }
 .pair .btn { border-radius: 999px 0 0 999px; }
 .pair select { min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-left: 0; border-radius: 0 999px 999px 0; background: var(--sheet2); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
+/* PDF 쪽 고르기 */
+.pages { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.pages-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.pages-head > b { font-size: 17px; color: var(--ink); }
+.thumbs { list-style: none; padding: 0; margin: 14px 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+.thumb { padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--sheet); cursor: grab; transition: opacity .15s, border-color .15s; }
+.thumb.dragging { opacity: .4; }
+.thumb.over { border-color: var(--accent); box-shadow: -4px 0 0 var(--accent); }
+.thumb .paper { height: 206px; display: flex; align-items: center; justify-content: center; background: var(--sheet2); border-radius: 8px; overflow: hidden; }
+.thumb canvas { max-width: 150px; max-height: 200px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); transition: transform .2s; }
+.thumb:not(.drawn) canvas { width: 120px; height: 170px; }
+.thumb .paper.turned canvas { max-width: 200px; max-height: 150px; }
+.thumb .paper.broken::after { content: '그림을 못 그렸어요'; font-size: 12px; color: var(--muted); }
+.thumb .paper.broken canvas { display: none; }
+.thumb .cap { display: flex; gap: 6px; align-items: baseline; margin: 8px 2px 6px; font-size: 13px; min-width: 0; }
+.thumb .cap .no { font-weight: 800; flex: none; }
+.thumb .cap .from { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thumb .tools { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.thumb .tools button { min-width: 0; min-height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--sheet2); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; padding: 0 4px; white-space: nowrap; }
+.thumb .tools button[data-a="left"], .thumb .tools button[data-a="right"] { color: var(--muted); }
+.thumb.gone .tools button:not([data-a="del"]) { visibility: hidden; }
+@media (max-width: 640px) {
+  .thumbs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .thumb { padding: 6px; }
+  .thumb .paper { height: 156px; }
+  .thumb canvas { max-width: 112px; max-height: 148px; }
+  .thumb .paper.turned canvas { max-width: 148px; max-height: 112px; }
+  .thumb:not(.drawn) canvas { width: 96px; height: 136px; }
+  .thumb .tools button { font-size: 12px; min-height: 36px; }
+}
+.thumb .tools button:hover { border-color: var(--accent); }
+.thumb.gone { opacity: .45; }
+.thumb.gone .paper { outline: 2px dashed var(--bad); outline-offset: -2px; }
+.thumb.gone .cap .no { color: var(--bad); }
 .smartscreen { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0 4px; font-size: 14px; }
 .smartscreen .win { background: #1f5fa8; color: #fff; border-radius: 8px; padding: 10px 14px; min-width: 170px; line-height: 1.5; }
 .smartscreen .win small { display: block; opacity: .8; }
@@ -137,7 +171,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
 <main>
   <div class="wrap hero">
     <h1>툭 놓으면 <em>끝</em></h1>
-    <p>파일을 끌어다 놓으면 PDF로 바꾸고, 그림 용량을 줄이고, ZIP으로 묶거나 풀어요. 설치 없이 웹에서 바로 쓰고, 한글·오피스 문서는 윈도우 프로그램으로 바꿔요.</p>
+    <p>파일을 끌어다 놓으면 PDF로 바꾸고, PDF를 합치거나 쪽을 빼고 돌리고, 그림 용량을 줄이고, ZIP으로 묶거나 풀어요. 설치 없이 웹에서 바로 쓰고, 한글·오피스 문서는 윈도우 프로그램으로 바꿔요.</p>
     <div class="cta">
       <a class="btn primary" href="#web">웹에서 바로 쓰기</a>
       <a class="btn" href="#windows">윈도우 프로그램 받기</a>
@@ -152,12 +186,13 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
       <div class="card tool">
         <div class="drop" id="drop" tabindex="0" role="button" aria-label="파일 고르기 또는 끌어다 놓기">
           <b>여기에 파일이나 폴더를 놓으세요</b>
-          <span>또는 눌러서 고르기 · 그림(JPG·PNG·GIF·WEBP·BMP) · ZIP · 아무 파일</span>
+          <span>또는 눌러서 고르기 · PDF · 그림(JPG·PNG·GIF·WEBP·BMP) · ZIP · 아무 파일</span>
         </div>
         <input type="file" id="picker" multiple class="sr" tabindex="-1">
         <ul class="files" id="files"></ul>
         <div class="actions" id="actions"></div>
         <p class="hint" id="hint" hidden></p>
+        <div class="pages" id="pages" hidden></div>
         <div class="status" id="status" role="status" aria-live="polite"></div>
         <ul class="results" id="results"></ul>
         <div class="bar" id="resultBar" hidden>
@@ -175,6 +210,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
       <div class="grid">
         <div class="card feature"><h3><span class="dot" style="background:#E86E3C"></span>PDF로</h3><p>그림을 A4 PDF로. 여러 장은 하나로 묶을 수도 있어요. 윈도우 프로그램은 한글·워드·엑셀·PPT도 PDF로 바꿔요.</p></div>
         <div class="card feature"><h3><span class="dot" style="background:#3C8CE8"></span>그림 용량 줄이기</h3><p>작게(1024)·보통(1600)·크게(2560) 중에 골라 JPG로. 알림장·메일에 올리기 좋아요. 사진 회전도 바로잡아요.</p></div>
+        <div class="card feature"><h3><span class="dot" style="background:#8A5CD6"></span>PDF 손질</h3><p>PDF 여러 개를 하나로 합치고, 쪽을 빼거나 돌리고, 끌어서 순서를 바꿔요. 쪽 그림을 보면서 고쳐요.</p></div>
         <div class="card feature"><h3><span class="dot" style="background:#2F8F5B"></span>ZIP 묶기·풀기</h3><p>여러 파일·폴더를 ZIP 하나로 묶거나, 받은 ZIP을 풀어요. 한글 이름이 깨진 ZIP도 읽어요.</p></div>
       </div>
     </div>
@@ -189,6 +225,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
           <thead><tr><th>할 일</th><th>웹</th><th>윈도우 프로그램</th></tr></thead>
           <tbody>
             <tr><td>그림 → PDF (하나로 묶기 포함)</td><td class="y">돼요</td><td class="y">돼요</td></tr>
+            <tr><td>PDF 합치기 · 쪽 빼기·돌리기·순서</td><td class="y">돼요</td><td class="n">웹으로 연결</td></tr>
             <tr><td>한글(HWP·HWPX) → PDF</td><td class="n">안 돼요</td><td class="y">돼요 · 한컴오피스 필요</td></tr>
             <tr><td>워드·엑셀·PPT → PDF</td><td class="n">안 돼요</td><td class="y">돼요 · MS 오피스 필요</td></tr>
             <tr><td>그림 용량 줄이기</td><td class="y">돼요</td><td class="y">돼요</td></tr>
@@ -240,6 +277,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="pdftools.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

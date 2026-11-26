@@ -23,6 +23,8 @@
   const stem = (n) => { const b = n.split('/').pop(); const i = b.lastIndexOf('.'); return i > 0 ? b.slice(0, i) : b; };
   const isImg = (it) => IMG.includes(ext(it.file.name));
   const isZip = (it) => ext(it.file.name) === 'zip';
+  const isPdf = (it) => ext(it.file.name) === 'pdf';
+  const pagesEl = $('#pages');
   const isOffice = (it) => OFFICE.includes(ext(it.file.name));
   const size = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(b / 1024)) + 'KB';
   const topName = (it) => it.path.split('/')[0];
@@ -67,8 +69,12 @@
     }
   }
 
+  let editor = null;
+  function closeEditor() { if (editor) { const e = editor; editor = null; e.close(); } }
+
   function setItems(list) {
     if (busy) return;
+    closeEditor();
     items = list;
     clearResults();
     render();
@@ -94,7 +100,10 @@
 
     actionsEl.innerHTML = '';
     const imgs = items.filter(isImg).length;
+    const pdfs = items.filter(isPdf).length;
     const choices = [];
+    if (pdfs > 1) choices.push(['merge', 'PDF 합치기 (' + pdfs + '개)']);
+    if (pdfs > 0) choices.push(['pages', pdfs > 1 ? '쪽 고르기·돌리기 (합쳐서)' : '쪽 빼기·돌리기·순서']);
     if (imgs > 0) choices.push(['pdf', imgs > 1 ? '그림마다 PDF로' : 'PDF로']);
     if (imgs > 1) choices.push(['pdfall', 'PDF 하나로 묶기 (' + imgs + '장)']);
     if (imgs > 0) choices.push(['shrink', '그림 용량 줄이기']);
@@ -161,7 +170,37 @@
     resultsEl.appendChild(li);
   }
 
-  $('#clear').addEventListener('click', () => { items = []; clearResults(); render(); });
+  $('#clear').addEventListener('click', () => { closeEditor(); items = []; clearResults(); render(); });
+
+  // ── PDF 쪽 고르기 ──
+  async function openEditor() {
+    if (busy || editor) return;
+    busy = true;
+    clearResults();
+    actionsEl.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    try {
+      editor = await window.TukPdf.edit(items.filter(isPdf).map((x) => x.file), pagesEl, {
+        status: setStatus,
+        done: (blob, name, note) => {
+          for (const r of results) if (r.url) URL.revokeObjectURL(r.url);
+          results = []; resultsEl.innerHTML = '';
+          addResult(name, blob, note + ' · ' + size(blob.size));
+          setStatus('다 됐어요. 받기를 누르세요. 더 고쳐서 다시 만들 수도 있어요.');
+          resultBar.hidden = false;
+          $('#zipAll').hidden = true;
+        },
+        closed: () => { editor = null; actionsEl.hidden = false; },
+      });
+      actionsEl.hidden = true;
+    } catch (e) {
+      editor = null;
+      pagesEl.hidden = true; pagesEl.innerHTML = '';
+      setStatus(why(e), true);
+    } finally {
+      busy = false;
+      actionsEl.querySelectorAll('button').forEach((b) => (b.disabled = false));
+    }
+  }
   $('#zipAll').addEventListener('click', async () => {
     const zip = new JSZip();
     const used = new Set();
@@ -188,6 +227,7 @@
 
   // ── 일하기 ──
   async function run(id) {
+    if (id === 'pages') return openEditor();
     if (busy) return;
     busy = true;
     clearResults();
@@ -196,7 +236,10 @@
     const notes = [];
     try {
       const imgs = items.filter(isImg);
-      if (id === 'pdf') {
+      if (id === 'merge') {
+        const m = await window.TukPdf.merge(items.filter(isPdf).map((x) => x.file), setStatus);
+        addResult(m.name, m.blob, m.pages + '쪽 · ' + size(m.blob.size));
+      } else if (id === 'pdf') {
         for (let i = 0; i < imgs.length; i++) {
           setStatus('PDF로 바꾸는 중… ' + (i + 1) + '/' + imgs.length);
           try { addResult(stem(imgs[i].file.name) + '.pdf', await imagesToPdf([imgs[i].file])); }

@@ -20,7 +20,7 @@ namespace Tuk
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "0.2.0";
+        public const string Version = "0.3.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -249,6 +249,7 @@ namespace Tuk
         public static bool IsPpt(string f) { return File.Exists(f) && Ppt.Contains(Ext(f)); }
         public static bool IsHwp(string f) { return File.Exists(f) && Hwp.Contains(Ext(f)); }
         public static bool IsZip(string f) { return File.Exists(f) && Ext(f) == ".zip"; }
+        public static bool IsPdfFile(string f) { return File.Exists(f) && Ext(f) == ".pdf"; }
         public static bool ToPdf(string f) { return IsImage(f) || IsWord(f) || IsExcel(f) || IsPpt(f) || IsHwp(f); }
     }
 
@@ -268,6 +269,7 @@ namespace Tuk
             if (pdf > 0) list.Add(new MenuChoice("pdf", "PDF로", pdf + "개 파일을 각각 PDF로"));
             if (img > 1) list.Add(new MenuChoice("pdfall", "PDF 하나로 묶기", "그림 " + img + "장을 PDF 한 개로"));
             if (img > 0) list.Add(new MenuChoice("shrink", "그림 용량 줄이기", "크기를 골라요 · JPG"));
+            if (files.Any(Kinds.IsPdfFile)) list.Add(new MenuChoice("pdfweb", "PDF 합치기·쪽 고르기 (웹)", "웹 버전을 열어요. 파일을 거기에 놓으면 돼요."));
             list.Add(new MenuChoice("zip", "ZIP으로 묶기", "고른 것을 압축 파일 하나로"));
             if (files.All(Kinds.IsZip)) list.Add(new MenuChoice("unzip", "압축 풀기", "새 폴더에 풀기"));
             return list;
@@ -864,6 +866,15 @@ namespace Tuk
                         sub.Click += delegate { chosen(id); };
                         item.DropDownItems.Add(sub);
                     }
+                }
+                else if (c.Id == "pdfweb")
+                {
+                    // PDF 손질은 웹 버전에서 한다. 파일이 있는 폴더도 같이 열어 끌어다 놓기 쉽게.
+                    item.Click += delegate
+                    {
+                        try { Process.Start(new ProcessStartInfo(Updater.Site + "#web") { UseShellExecute = true }); } catch { }
+                        try { Process.Start("explorer.exe", "/select,\"" + files.First(Kinds.IsPdfFile) + "\""); } catch { }
+                    };
                 }
                 else item.Click += delegate { chosen(choice.Id); };
                 m.Items.Add(item);
