@@ -67,7 +67,7 @@
   // ── 파일 받기 ──
   // 하고 싶은 일로 시작하기: 그 일에 맞는 파일만 고르게 하고, 고르면 바로 시작한다
   const TASKS = {
-    pdfall: 'image/*,.heic,.heif', merge: '.pdf,application/pdf', pages: '.pdf,application/pdf',
+    scanpdf: 'image/*,.heic,.heif', pdfall: 'image/*,.heic,.heif', merge: '.pdf,application/pdf', pages: '.pdf,application/pdf',
     squeeze: '.pdf,application/pdf', shrink: 'image/*,.heic,.heif', unzip: '.zip,application/zip',
   };
   let intent = null;
@@ -81,6 +81,7 @@
   }));
   function startIntent(id) {
     const imgs = items.filter(isImg).length, pdfs = items.filter(isPdf).length;
+    if (id === 'scanpdf') { if (imgs > 0) return run('scanpdf'); return setStatus('문서를 찍은 사진을 골라 주세요.', true); }
     if (id === 'pdfall') { if (imgs > 1) return run('pdfall'); if (imgs === 1) return run('pdf'); return setStatus('사진이나 그림을 골라 주세요.', true); }
     if (id === 'shrink') { if (imgs > 0) return run('shrink'); return setStatus('사진이나 그림을 골라 주세요.', true); }
     if (id === 'merge') {
@@ -226,6 +227,7 @@
     if (pdfs > 0) choices.push(['nup', '모아 찍기 (한 장에 2·4쪽)']);
     if (pdfs > 0) choices.push(['pdftxt', '글자 뽑기 (TXT)']);
     if (imgs > 0) choices.push(['pdf', imgs > 1 ? '그림마다 PDF로' : 'PDF로']);
+    if (imgs > 0) choices.push(['scanpdf', '스캔 PDF 만들기 (문서 사진)']);
     if (imgs > 1) choices.push(['pdfall', 'PDF 하나로 묶기 (' + imgs + '장)']);
     if (imgs > 1) choices.push(['arrange', '순서 정해서 묶기']);
     // 형식 바꾸기: JPG가 아닌 그림 → JPG, (JPG·PNG가 아닌) WEBP·HEIC·GIF·BMP → PNG
@@ -243,7 +245,7 @@
     if (items.length > 0 && items.every(isZip)) choices.push(['unzip', '압축 풀기']);
     // 단추가 많아서 하는 일끼리 묶어 보여 준다. 맨 앞 단추가 가장 흔히 쓰는 일(주황색).
     const GROUPS = [
-      ['PDF 만들기', ['pdf', 'pdfall', 'arrange', 'merge']],
+      ['PDF 만들기', ['pdf', 'pdfall', 'arrange', 'scanpdf', 'merge']],
       ['PDF 손질', ['pages', 'extract', 'split', 'pagenum', 'wm', 'nup', 'fita4', 'squeeze']],
       ['바꾸기', ['pdfjpg', 'pdftxt', 'tojpg', 'topng', 'shrink', 'scan', 'crop', 'trim', 'imgwm']],
       ['파일', ['unzip', 'zip', 'rename']],
@@ -735,6 +737,40 @@
           } catch (e) { problems.push(f.name + ': ' + why(e)); }
         }
         if (!png && list.some((x) => !isHeic(x))) notes.push('투명한 부분은 흰색이 돼요');
+      } else if (id === 'scanpdf') {
+        // 문서 사진 → 귀퉁이를 찾아 반듯하게 → 스캔처럼 보정 → PDF 하나로
+        const pages = [];
+        let uncut = 0;
+        for (let i = 0; i < imgs.length; i++) {
+          const f = imgs[i].file;
+          setStatus('스캔하는 중… ' + (i + 1) + '/' + imgs.length);
+          try {
+            const src = await decode(f);
+            let w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+            const k = Math.min(1, 3000 / Math.max(w, h));
+            w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k));
+            let c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            const g = c.getContext('2d', { willReadFrequently: true });
+            g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+            g.drawImage(src, 0, 0, w, h);
+            if (src.close) src.close();
+            const q = window.TukCrop.detect(c);
+            if (q) { const flat = window.TukCrop.warp(c, q.map(([x, y]) => [x * w, y * h])); c.width = c.height = 0; c = flat; }
+            else uncut++;
+            const cut = await new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('그림을 만들지 못했어요'))), 'image/jpeg', 0.95));
+            c.width = c.height = 0;
+            const clean = await scanImage(new File([cut], 'x.jpg', { type: 'image/jpeg' }), scanMode === 1);
+            pages.push(new File([clean], stem(f.name) + '.jpg', { type: 'image/jpeg' }));
+          } catch (e) { if (e === STOP) throw e; problems.push(f.name + ': ' + why(e)); }
+        }
+        if (pages.length) {
+          const blob = await imagesToPdf(pages, (i) => setStatus('PDF로 묶는 중… ' + (i + 1) + '/' + pages.length), 1);
+          addResult(stem(imgs[0].file.name) + '_스캔.pdf', blob, pages.length + '쪽 · ' + size(blob.size));
+          if (uncut === pages.length) notes.push('문서 귀퉁이를 찾지 못해 자르지 않고 보정만 했어요. 잘라야 하면 \'반듯하게 자르기\'로 직접 맞춰 주세요');
+          else if (uncut) notes.push(uncut + '장은 귀퉁이를 찾지 못해 자르지 않고 보정만 했어요');
+          notes.push(scanMode === 1 ? '컬러로 만들었어요' : '흑백으로 만들었어요 (색을 남기려면 \'스캔처럼 보정\' 옆에서 \'컬러 유지\'를 고르세요)');
+        }
       } else if (id === 'scan') {
         for (let i = 0; i < imgs.length; i++) {
           const f = imgs[i].file;

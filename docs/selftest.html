@@ -195,6 +195,8 @@ a { color: inherit; }
       await setFiles([photo]); click('반듯하게 자르기');
       for (let i = 0; i < 100 && !(doc.querySelector('#pages .crop-pt') && /이대로 자르기/.test(status())); i++) await sleep(100);
       need(doc.querySelectorAll('#pages .crop-pt').length === 4, '편집 화면이 열리지 않았어요');
+      // 화면 배치가 끝나 그림 크기가 잡힐 때까지 기다린다 (그 전에 끌면 네 점이 한곳에 모인다)
+      for (let i = 0; i < 50 && doc.querySelector('#pages .crop-stage canvas').getBoundingClientRect().width < 50; i++) await sleep(100);
       // 손잡이를 끌어 본다 (첫 모서리를 종이 귀퉁이로)
       const stage = doc.querySelector('#pages .crop-stage canvas').getBoundingClientRect();
       const hd = doc.querySelectorAll('#pages .crop-pt');
@@ -245,6 +247,32 @@ a { color: inherit; }
       const bmp = await createImageBitmap(await (await fetch(r[0].url)).blob());
       need(bmp.height > bmp.width && Math.abs(bmp.height - 960) < 60 && Math.abs(bmp.width - 610) < 60, '돌린 결과 크기가 이상해요: ' + bmp.width + '×' + bmp.height);
       return '어긋남 ' + off.toFixed(1) + '% · 돌린 결과 ' + bmp.width + '×' + bmp.height;
+    }],
+    ['스캔 PDF 만들기 (한 번에)', async () => {
+      const shot = async (name, q, paper) => {
+        const c = document.createElement('canvas'); c.width = 1200; c.height = 900;
+        const g = c.getContext('2d');
+        g.fillStyle = '#4a4038'; g.fillRect(0, 0, 1200, 900);
+        const gr = g.createLinearGradient(0, 0, 1200, 900); gr.addColorStop(0, paper); gr.addColorStop(1, '#b7ad96');
+        g.fillStyle = gr; g.beginPath(); q.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.fill();
+        g.fillStyle = '#222'; g.font = 'bold 44px sans-serif';
+        for (let i = 0; i < 5; i++) g.fillText('알림장 ' + name + ' ' + i, q[0][0] + 90, q[0][1] + 150 + i * 85);
+        return new Promise((res) => c.toBlob((b) => res(new File([b], name + '.jpg', { type: 'image/jpeg' })), 'image/jpeg', 0.9));
+      };
+      await setFiles([await shot('1쪽', [[260, 120], [1040, 200], [1100, 800], [140, 720]], '#f2ead6'), await shot('2쪽', [[200, 90], [1000, 140], [1060, 830], [170, 790]], '#efe6d0')]);
+      click('스캔 PDF 만들기'); await done(120000);
+      const r = results(); need(r.length === 1 && /2쪽/.test(r[0].note), status());
+      const b = await bytes(r[0]); need(starts(b, PDF), 'PDF가 아니에요');
+      need(!/귀퉁이를 찾지 못/.test(status()), '귀퉁이를 못 찾았어요: ' + status());
+      // 첫 쪽을 그림으로 바꿔서 바탕이 하얗고 반듯한지 본다
+      const pg = (await win.TukPdf.toJpg([new File([b], 's.pdf', { type: 'application/pdf' })], () => {}))[0];
+      const bmp = await createImageBitmap(pg.blob);
+      const o = document.createElement('canvas'); o.width = bmp.width; o.height = bmp.height;
+      const og = o.getContext('2d'); og.drawImage(bmp, 0, 0);
+      const lum = (fx, fy) => og.getImageData(Math.round(bmp.width * fx), Math.round(bmp.height * fy), 1, 1).data[0];
+      const edge = [lum(0.12, 0.3), lum(0.88, 0.3), lum(0.12, 0.7), lum(0.88, 0.7)];
+      need(edge.every((v) => v > 235), '종이 가장자리가 하얗지 않아요 (책상이 남았거나 그늘이 남음): ' + edge.join(', '));
+      return r[0].name + ' · ' + r[0].note + ' · 가장자리 밝기 ' + edge.join('·');
     }],
     ['여백 자르기', async () => {
       await setFiles([await picture('캡처.png', 900, 700, '#3C8CE8')]);
