@@ -24,6 +24,12 @@
   let pdfMargin = 28;
   try { const v = localStorage.getItem('tuk.pdfMargin'); if (v !== null && MARGINS.some(([m]) => m === Number(v))) pdfMargin = Number(v); } catch (_) { /* 저장 못 해도 괜찮다 */ }
 
+  // 한 쪽에 몇 장 (PDF 하나로 묶기·순서 정해서 묶기)
+  const PER = [[1, '한 쪽에 1장'], [2, '한 쪽에 2장'], [4, '한 쪽에 4장'], [6, '한 쪽에 6장'], [9, '한 쪽에 9장']];
+  let pdfPer = 1;
+  try { const v = Number(localStorage.getItem('tuk.pdfPer')); if (PER.some(([n]) => n === v)) pdfPer = v; } catch (_) { /* 저장 못 해도 괜찮다 */ }
+  const GRID = { 1: [1, 1], 2: [1, 2], 4: [2, 2], 6: [2, 3], 9: [3, 3] };
+
   const ext = (n) => (n.split('.').pop() || '').toLowerCase();
   const stem = (n) => { const b = n.split('/').pop(); const i = b.lastIndexOf('.'); return i > 0 ? b.slice(0, i) : b; };
   const isImg = (it) => IMG.includes(ext(it.file.name));
@@ -171,6 +177,7 @@
     if (pdfs > 0) choices.push(['squeeze', 'PDF 용량 줄이기 (스캔본)']);
     if (pdfs > 0) choices.push(['split', '쪽마다 나누기']);
     if (pdfs > 0) choices.push(['pdfjpg', 'PDF → JPG 그림']);
+    if (pdfs > 0) choices.push(['nup', '모아 찍기 (한 장에 2·4쪽)']);
     if (imgs > 0) choices.push(['pdf', imgs > 1 ? '그림마다 PDF로' : 'PDF로']);
     if (imgs > 1) choices.push(['pdfall', 'PDF 하나로 묶기 (' + imgs + '장)']);
     if (imgs > 1) choices.push(['arrange', '순서 정해서 묶기']);
@@ -193,6 +200,8 @@
       } else if (id === 'pdf') {
         // 여백은 'PDF로'와 'PDF 하나로 묶기'에 함께 쓴다
         actionsEl.appendChild(pair(b, 'PDF 여백', MARGINS, pdfMargin, (v) => { pdfMargin = v; remember('pdfMargin', v); }));
+      } else if (id === 'pdfall') {
+        actionsEl.appendChild(pair(b, '한 쪽에 몇 장', PER, pdfPer, (v) => { pdfPer = v; remember('pdfPer', v); }));
       } else actionsEl.appendChild(b);
     });
 
@@ -280,7 +289,7 @@
     try {
       editor = await window.TukPdf.edit(items.filter(photos ? isImg : isPdf).map((x) => x.file), pagesEl, {
         status: setStatus,
-        images: photos ? (list) => imagesToPdf(list, (i) => setStatus('PDF 만드는 중… ' + (i + 1) + '/' + list.length)) : undefined,
+        images: photos ? (list) => imagesToPdf(list, (i) => setStatus('PDF 만드는 중… ' + (i + 1) + '/' + list.length), pdfPer) : undefined,
         done: (blob, name, note) => {
           for (const r of results) if (r.url) URL.revokeObjectURL(r.url);
           results = []; resultsEl.innerHTML = '';
@@ -348,6 +357,16 @@
         '<label>방향 <select name="diagonal"><option value="1">대각선</option><option value="0">가로</option></select></label>',
       read: (f) => ({ text: f.text.value.trim(), alpha: Number(f.alpha.value), diagonal: f.diagonal.value === '1' }),
       run: (files, o) => window.TukPdf.watermark(files, o, setStatus),
+    },
+    nup: {
+      title: '모아 찍기',
+      submit: '모아 찍기',
+      html:
+        '<label>한 장에 <select name="per"><option value="2">2쪽 (가로로 나란히)</option><option value="4">4쪽 (2×2)</option></select></label>' +
+        '<label class="check"><input name="border" type="checkbox" checked> 쪽마다 얇은 테두리</label>' +
+        '<p class="opts-note">인쇄할 종이를 아껴요. 원래 쪽은 줄어서 A4 한 장에 들어가요.</p>',
+      read: (f) => ({ per: Number(f.per.value) === 4 ? 4 : 2, border: f.border.checked }),
+      run: (files, o) => window.TukPdf.nup(files, o, setStatus),
     },
     squeeze: {
       title: 'PDF 용량 줄이기 (스캔본)',
@@ -463,7 +482,10 @@
         }
       } else if (id === 'pdfall') {
         setStatus('PDF 하나로 묶는 중…');
-        addResult(stem(imgs[0].file.name) + '_묶음.pdf', await imagesToPdf(imgs.map((x) => x.file), (i) => setStatus('PDF 하나로 묶는 중… ' + (i + 1) + '/' + imgs.length)));
+        const blob = await imagesToPdf(imgs.map((x) => x.file), (i) => setStatus('PDF 하나로 묶는 중… ' + (i + 1) + '/' + imgs.length), pdfPer);
+        const sheets = Math.ceil(imgs.length / pdfPer);
+        addResult(stem(imgs[0].file.name) + (pdfPer > 1 ? '_한쪽에' + pdfPer + '장.pdf' : '_묶음.pdf'), blob,
+          (pdfPer > 1 ? imgs.length + '장 → ' + sheets + '쪽 · ' : '') + size(blob.size));
       } else if (id === 'shrink') {
         let before = 0, after = 0, done = 0;
         for (let i = 0; i < imgs.length; i++) {
@@ -622,8 +644,11 @@
   }
 
   // ── PDF (그림마다 A4 한 쪽, 가로 그림은 가로 쪽) ──
-  async function imagesToPdf(files, progress) {
+  async function imagesToPdf(files, progress, per) {
     const A4W = 595.28, A4H = 841.89, M = pdfMargin;
+    per = GRID[per] ? per : 1;
+    const [cols, rows] = GRID[per];
+    const gap = M > 0 ? 10 : 4;
     const enc = new TextEncoder();
     const parts = [];
     const off = {};
@@ -636,27 +661,45 @@
     off[1] = pos; put('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
     let next = 3;
     const kids = [];
-    for (let i = 0; i < files.length; i++) {
-      if (progress) progress(i);
-      // files: File 또는 {file, rot} (순서 정하기에서 돌린 사진)
-      const one = files[i] instanceof Blob ? { file: files[i], rot: 0 } : files[i];
-      const { bytes, w, h } = await toJpeg(one.file, 0, 0.9, one.rot);
-      const land = w > h;
-      const pw = land ? A4H : A4W, ph = land ? A4W : A4H;
-      const s = Math.min((pw - 2 * M) / w, (ph - 2 * M) / h);
-      const dw = w * s, dh = h * s, x = (pw - dw) / 2, y = (ph - dh) / 2;
-      const imgId = next++, cId = next++, pId = next++;
-      off[imgId] = pos;
-      put(imgId + ' 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + w + ' /Height ' + h +
-        ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + bytes.length + ' >>\nstream\n');
-      put(bytes);
-      put('\nendstream\nendobj\n');
-      const content = 'q ' + n(dw) + ' 0 0 ' + n(dh) + ' ' + n(x) + ' ' + n(y) + ' cm /Im0 Do Q\n';
+    for (let start = 0; start < files.length; start += per) {
+      // 한 쪽에 여러 장이면 세로 A4에 격자로 (왼쪽 위부터 오른쪽으로)
+      let pw = A4W, ph = A4H, content = '', res = '';
+      const count = Math.min(per, files.length - start);
+      for (let k = 0; k < count; k++) {
+        const i = start + k;
+        if (progress) progress(i);
+        // files: File 또는 {file, rot} (순서 정하기에서 돌린 사진)
+        const one = files[i] instanceof Blob ? { file: files[i], rot: 0 } : files[i];
+        const { bytes, w, h } = await toJpeg(one.file, per > 1 ? 2000 : 0, per > 1 ? 0.85 : 0.9, one.rot);
+        let cx, cy, cw, ch;
+        if (per === 1) {
+          const land = w > h;
+          pw = land ? A4H : A4W; ph = land ? A4W : A4H;
+          cx = M; cy = M; cw = pw - 2 * M; ch = ph - 2 * M;
+        } else {
+          cw = (pw - 2 * M - (cols - 1) * gap) / cols;
+          ch = (ph - 2 * M - (rows - 1) * gap) / rows;
+          const col = k % cols, row = Math.floor(k / cols);
+          cx = M + col * (cw + gap);
+          cy = ph - M - (row + 1) * ch - row * gap;
+        }
+        const s = Math.min(cw / w, ch / h);
+        const dw = w * s, dh = h * s, x = cx + (cw - dw) / 2, y = cy + (ch - dh) / 2;
+        const imgId = next++;
+        off[imgId] = pos;
+        put(imgId + ' 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + w + ' /Height ' + h +
+          ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + bytes.length + ' >>\nstream\n');
+        put(bytes);
+        put('\nendstream\nendobj\n');
+        content += 'q ' + n(dw) + ' 0 0 ' + n(dh) + ' ' + n(x) + ' ' + n(y) + ' cm /Im' + k + ' Do Q\n';
+        res += '/Im' + k + ' ' + imgId + ' 0 R ';
+      }
+      const cId = next++, pId = next++;
       off[cId] = pos;
       put(cId + ' 0 obj\n<< /Length ' + content.length + ' >>\nstream\n' + content + 'endstream\nendobj\n');
       off[pId] = pos;
-      put(pId + ' 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + n(pw) + ' ' + n(ph) + '] /Resources << /XObject << /Im0 ' +
-        imgId + ' 0 R >> >> /Contents ' + cId + ' 0 R >>\nendobj\n');
+      put(pId + ' 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + n(pw) + ' ' + n(ph) + '] /Resources << /XObject << ' +
+        res + '>> >> /Contents ' + cId + ' 0 R >>\nendobj\n');
       kids.push(pId);
     }
     off[2] = pos;

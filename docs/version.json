@@ -1,9 +1,9 @@
 {
-    "version":  "1.1.0",
+    "version":  "1.2.0",
     "url":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.exe",
-    "sha256":  "47ac3983223040c7c1ebe3bb5bb744995ff45a723668d1824a4c3f15e9dcb9f3",
-    "notes":  "JPG로 바꾸기가 아이폰 사진(HEIC)뿐 아니라 PNG·BMP·GIF·TIF 그림에도 나와요. 투명한 부분은 흰색이 돼요. 웹 버전은 크롬·엣지에서도 아이폰 사진을 읽고, PNG로 바꾸기도 돼요.",
+    "sha256":  "fe5505c87efbbf3e09844979b70c341324555bef7dd06a4f2d455eb4b46b2243",
+    "notes":  "PDF 하나로 묶기에서 A4 한 쪽에 사진 2장·4장씩 모아 넣을 수 있어요 (메뉴의 \u0027한 쪽에 2장/4장\u0027). 웹 버전은 6·9장과 PDF 모아 찍기(한 장에 2·4쪽)도 돼요.",
     "zip":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.zip",
-    "zipBytes":  31943,
+    "zipBytes":  32547,
     "date":  "2026-11-26"
 }

@@ -2,7 +2,7 @@
 // 파일은 어디로도 보내지 않는다. 다른 앱에서 '공유'로 받은 파일도 이 기기 안에만 잠깐 둔다.
 'use strict';
 
-const VERSION = 'tuk-1.1.0';
+const VERSION = 'tuk-1.2.0';
 const SHELL = VERSION + '-shell';
 const LIBS = 'tuk-libs';          // 버전이 주소에 박힌 라이브러리 — 바뀌지 않으니 계속 쓴다
 const SHARE = 'tuk-share';        // 공유로 받은 파일을 화면이 꺼낼 때까지만 둔다

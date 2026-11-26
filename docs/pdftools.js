@@ -526,5 +526,48 @@
     return { close };
   }
 
-  window.TukPdf = { merge, edit, split, toJpg, pageNumbers, watermark, squeeze };
+  /**
+   * 모아 찍기: 원래 쪽 2개(가로 A4에 나란히) 또는 4개(세로 A4에 2×2)를 한 장에
+   * @param {{per: 2|4, border: boolean}} o
+   */
+  async function nup(files, o, status) {
+    await needPdfLib();
+    const { PDFDocument, degrees, rgb } = window.PDFLib;
+    const per = o.per === 4 ? 4 : 2;
+    const PW = per === 2 ? 841.89 : 595.28, PH = per === 2 ? 595.28 : 841.89;
+    const cols = 2, rows = per === 2 ? 1 : 2, M = 18, G = 12;
+    const cw = (PW - 2 * M - (cols - 1) * G) / cols, ch = (PH - 2 * M - (rows - 1) * G) / rows;
+    const out = [];
+    for (const f of [...files].sort(byName)) {
+      status(f.name + ' 모아 찍는 중…');
+      const { doc: src } = await openPdf(f);
+      const dst = await PDFDocument.create();
+      const pages = src.getPages();
+      let sheet = null;
+      for (let i = 0; i < pages.length; i++) {
+        if (i % per === 0) sheet = dst.addPage([PW, PH]);
+        const p = pages[i];
+        const b = p.getCropBox();
+        const r = ((p.getRotation().angle % 360) + 360) % 360;
+        const emb = await dst.embedPage(p, { left: b.x, bottom: b.y, right: b.x + b.width, top: b.y + b.height });
+        // 돌려 둔 쪽(/Rotate)은 보이는 방향대로 놓는다
+        const vw = r % 180 ? emb.height : emb.width, vh = r % 180 ? emb.width : emb.height;
+        const s = Math.min(cw / vw, ch / vh), dw = vw * s, dh = vh * s;
+        const k = i % per, col = k % cols, row = Math.floor(k / cols);
+        const cx = M + col * (cw + G) + (cw - dw) / 2;
+        const cy = PH - M - (row + 1) * ch - row * G + (ch - dh) / 2;
+        let x = cx, y = cy, turn = 0;
+        if (r === 90) { y = cy + dh; turn = -90; }
+        else if (r === 180) { x = cx + dw; y = cy + dh; turn = 180; }
+        else if (r === 270) { x = cx + dw; turn = 90; }
+        sheet.drawPage(emb, { x, y, xScale: s, yScale: s, rotate: degrees(turn) });
+        if (o.border) sheet.drawRectangle({ x: cx, y: cy, width: dw, height: dh, borderColor: rgb(0.6, 0.6, 0.6), borderWidth: 0.5 });
+      }
+      const blob = new Blob([await dst.save()], { type: 'application/pdf' });
+      out.push({ name: stem(f.name) + '_모아찍기.pdf', blob, note: pages.length + '쪽 → ' + dst.getPageCount() + '장 · ' + (blob.size >= 1048576 ? (blob.size / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(blob.size / 1024)) + 'KB') });
+    }
+    return out;
+  }
+
+  window.TukPdf = { merge, edit, split, toJpg, pageNumbers, watermark, squeeze, nup };
 })();

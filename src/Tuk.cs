@@ -24,7 +24,7 @@ namespace Tuk
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -337,8 +337,10 @@ namespace Tuk
                     case "pdfall":
                     case "pdfall-n":
                     case "pdfall-0":
+                    case "pdfall-2":
+                    case "pdfall-4":
                         // 보내기 메뉴는 고른 순서가 들쭉날쭉하니 이름 순서(1, 2, 10…)로 묶는다
-                        Safe(r, files[0], delegate { ImagesToOnePdf(r, Paths.Natural(files.Where(Kinds.IsImage)), MarginOf(id)); }); break;
+                        Safe(r, files[0], delegate { ImagesToOnePdf(r, Paths.Natural(files.Where(Kinds.IsImage)), MarginOf(id), PerPageOf(id)); }); break;
                     case "rotr":
                     case "rotl":
                         each(files.Where(Kinds.IsImage), delegate (string f) { r.Made.Add(Pictures.Rotate(f, id == "rotr")); });
@@ -410,6 +412,12 @@ namespace Tuk
             return id.EndsWith("-n") ? 10 : id.EndsWith("-0") ? 0 : 28;
         }
 
+        /// 한 쪽에 몇 장: pdfall-2 · pdfall-4
+        public static int PerPageOf(string id)
+        {
+            return id.EndsWith("-2") ? 2 : id.EndsWith("-4") ? 4 : 1;
+        }
+
         static void Safe(JobResult r, string f, Action a)
         {
             try { a(); }
@@ -454,10 +462,10 @@ namespace Tuk
             r.Made.Add(outPath);
         }
 
-        static void ImagesToOnePdf(JobResult r, List<string> imgs, double margin)
+        static void ImagesToOnePdf(JobResult r, List<string> imgs, double margin, int per)
         {
-            string outPath = Paths.Beside(imgs[0], "_묶음", ".pdf");
-            Pdf.FromImages(outPath, imgs, margin);
+            string outPath = Paths.Beside(imgs[0], per > 1 ? "_한쪽에" + per + "장" : "_묶음", ".pdf");
+            Pdf.FromImages(outPath, imgs, margin, per);
             r.Made.Add(outPath);
         }
 
@@ -656,12 +664,16 @@ namespace Tuk
     {
         const double A4W = 595.28, A4H = 841.89;
 
-        public static void FromImages(string outPath, IList<string> images, double Margin)
+        public static void FromImages(string outPath, IList<string> images, double Margin, int perPage = 1)
         {
             string tmp = outPath + ".part";
             var offsets = new Dictionary<int, long>();
-            int pageCount = images.Count;
             var kids = new List<int>();
+            // 한 쪽에 여러 장이면 세로 A4에 격자로 (왼쪽 위부터 오른쪽으로)
+            int per = perPage == 2 || perPage == 4 || perPage == 6 || perPage == 9 ? perPage : 1;
+            int cols = per == 4 || per == 6 ? 2 : per == 9 ? 3 : 1;
+            int rows = per == 2 || per == 4 ? 2 : per == 6 || per == 9 ? 3 : 1;
+            double gap = Margin > 0 ? 10 : 4;
             try
             {
                 using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write))
@@ -670,37 +682,67 @@ namespace Tuk
                     w.Raw("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
                     offsets[1] = w.Pos; w.Raw("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
                     int next = 3;
-                    foreach (var f in images)
+                    for (int start = 0; start < images.Count; start += per)
                     {
-                        byte[] jpg; int iw, ih;
-                        using (var img = Pictures.LoadUpright(f))
+                        double pw = A4W, ph = A4H;
+                        var content = new StringBuilder();
+                        var res = new StringBuilder();
+                        int count = Math.Min(per, images.Count - start);
+                        for (int k = 0; k < count; k++)
                         {
-                            jpg = Pictures.Jpeg(img, 0, 90);
-                            iw = img.Width; ih = img.Height;
+                            byte[] jpg; int iw, ih;
+                            int maxSide = per > 1 ? 2000 : 0;
+                            using (var img = Pictures.LoadUpright(images[start + k]))
+                            {
+                                jpg = Pictures.Jpeg(img, maxSide, per > 1 ? 85 : 90);
+                                iw = img.Width; ih = img.Height;
+                                // Pictures.Jpeg와 같은 셈으로 줄어든 크기
+                                if (maxSide > 0 && Math.Max(iw, ih) > maxSide)
+                                {
+                                    double k2 = (double)maxSide / Math.Max(iw, ih);
+                                    iw = Math.Max(1, (int)Math.Round(iw * k2));
+                                    ih = Math.Max(1, (int)Math.Round(ih * k2));
+                                }
+                            }
+                            double cx, cy, cw, ch;
+                            if (per == 1)
+                            {
+                                bool land = iw > ih;
+                                pw = land ? A4H : A4W; ph = land ? A4W : A4H;
+                                cx = Margin; cy = Margin; cw = pw - 2 * Margin; ch = ph - 2 * Margin;
+                            }
+                            else
+                            {
+                                cw = (pw - 2 * Margin - (cols - 1) * gap) / cols;
+                                ch = (ph - 2 * Margin - (rows - 1) * gap) / rows;
+                                int col = k % cols, row = k / cols;
+                                cx = Margin + col * (cw + gap);
+                                cy = ph - Margin - (row + 1) * ch - row * gap;
+                            }
+                            double s = Math.Min(cw / iw, ch / ih);
+                            double dw = iw * s, dh = ih * s, x = cx + (cw - dw) / 2, y = cy + (ch - dh) / 2;
+
+                            int imgId = next++;
+                            offsets[imgId] = w.Pos;
+                            w.Raw(imgId + " 0 obj\n<< /Type /XObject /Subtype /Image /Width " + iw + " /Height " + ih +
+                                  " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + jpg.Length + " >>\nstream\n");
+                            w.Bytes(jpg);
+                            w.Raw("\nendstream\nendobj\n");
+                            content.Append("q " + N(dw) + " 0 0 " + N(dh) + " " + N(x) + " " + N(y) + " cm /Im" + k + " Do Q\n");
+                            res.Append("/Im" + k + " " + imgId + " 0 R ");
                         }
-                        bool land = iw > ih;
-                        double pw = land ? A4H : A4W, ph = land ? A4W : A4H;
-                        double s = Math.Min((pw - 2 * Margin) / iw, (ph - 2 * Margin) / ih);
-                        double dw = iw * s, dh = ih * s, x = (pw - dw) / 2, y = (ph - dh) / 2;
-
-                        int imgId = next++, contentId = next++, pageId = next++;
-                        offsets[imgId] = w.Pos;
-                        w.Raw(imgId + " 0 obj\n<< /Type /XObject /Subtype /Image /Width " + iw + " /Height " + ih +
-                              " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + jpg.Length + " >>\nstream\n");
-                        w.Bytes(jpg);
-                        w.Raw("\nendstream\nendobj\n");
-
-                        string content = "q " + N(dw) + " 0 0 " + N(dh) + " " + N(x) + " " + N(y) + " cm /Im0 Do Q\n";
+                        int contentId = next++, pageId = next++;
+                        string c = content.ToString();
                         offsets[contentId] = w.Pos;
-                        w.Raw(contentId + " 0 obj\n<< /Length " + content.Length + " >>\nstream\n" + content + "endstream\nendobj\n");
+                        w.Raw(contentId + " 0 obj\n<< /Length " + c.Length + " >>\nstream\n" + c + "endstream\nendobj\n");
 
                         offsets[pageId] = w.Pos;
                         w.Raw(pageId + " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + N(pw) + " " + N(ph) + "] " +
-                              "/Resources << /XObject << /Im0 " + imgId + " 0 R >> >> /Contents " + contentId + " 0 R >>\nendobj\n");
+                              "/Resources << /XObject << " + res + ">> >> /Contents " + contentId + " 0 R >>\nendobj\n");
                         kids.Add(pageId);
                     }
                     offsets[2] = w.Pos;
-                    w.Raw("2 0 obj\n<< /Type /Pages /Count " + pageCount + " /Kids [" + string.Join(" ", kids.Select(k => k + " 0 R")) + "] >>\nendobj\n");
+                    w.Raw("2 0 obj\n<< /Type /Pages /Count " + kids.Count + " /Kids [" + string.Join(" ", kids.Select(k => k + " 0 R")) + "] >>\nendobj\n");
 
                     int size = next;
                     long xref = w.Pos;
@@ -1166,6 +1208,23 @@ namespace Tuk
                         var sub = new ToolStripMenuItem(s[1]) { ToolTipText = s[2] };
                         sub.Click += delegate { chosen(id); };
                         item.DropDownItems.Add(sub);
+                    }
+                    if (c.Id == "pdfall")
+                    {
+                        // 한 쪽에 여러 장 (사진 모아 찍기)
+                        item.DropDownItems.Add(new ToolStripSeparator());
+                        var grids = new[]
+                        {
+                            new[] { "-2", "&4  한 쪽에 2장", "A4 한 쪽에 위아래로 2장씩" },
+                            new[] { "-4", "&5  한 쪽에 4장", "A4 한 쪽에 2×2로 4장씩" },
+                        };
+                        foreach (var s in grids)
+                        {
+                            var id = c.Id + s[0];
+                            var sub = new ToolStripMenuItem(s[1]) { ToolTipText = s[2] };
+                            sub.Click += delegate { chosen(id); };
+                            item.DropDownItems.Add(sub);
+                        }
                     }
                     item.Click += delegate { chosen(choice.Id); m.Close(); };
                 }
