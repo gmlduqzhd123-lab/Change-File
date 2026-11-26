@@ -85,6 +85,60 @@
     return { blob: await build(sources, spec), name: stem(list[0].name) + '_합침.pdf', pages: spec.length };
   }
 
+  const pad = (n, total) => String(n).padStart(String(total).length < 2 ? 2 : String(total).length, '0');
+
+  /** PDF마다 쪽을 하나씩 따로 PDF로. 돌려주는 값: [{name, blob}] */
+  async function split(files, status) {
+    await needPdfLib();
+    const list = [...files].sort(byName);
+    const out = [];
+    for (const f of list) {
+      const s = await openPdf(f);
+      const n = s.doc.getPageCount();
+      for (let page = 0; page < n; page++) {
+        status(f.name + ' 나누는 중… ' + (page + 1) + '/' + n);
+        out.push({ name: stem(f.name) + '_' + pad(page + 1, n) + '쪽.pdf', blob: await build([s], [{ src: 0, page, rot: 0 }]) });
+      }
+    }
+    return out;
+  }
+
+  /** PDF 쪽을 JPG 그림으로 (150dpi, 긴 쪽 최대 3000픽셀). 돌려주는 값: [{name, blob}] */
+  async function toJpg(files, status) {
+    await needPdfJs();
+    const list = [...files].sort(byName);
+    const out = [];
+    for (const f of list) {
+      let view;
+      try { view = await window.pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), isEvalSupported: false }).promise; }
+      catch (e) {
+        if (e && e.name === 'PasswordException') throw new Error(f.name + ': 암호가 걸린 PDF라서 열 수 없어요');
+        throw new Error(f.name + ': PDF가 손상됐거나 읽을 수 없어요');
+      }
+      try {
+        const n = view.numPages;
+        if (n > MAX_PAGES) throw new Error(f.name + ': 쪽이 너무 많아요 (' + MAX_PAGES + '쪽까지)');
+        for (let i = 1; i <= n; i++) {
+          status(f.name + ' 그림으로 바꾸는 중… ' + i + '/' + n);
+          const page = await view.getPage(i);
+          const vp1 = page.getViewport({ scale: 1 });
+          const scale = Math.min(150 / 72, 3000 / Math.max(vp1.width, vp1.height));
+          const vp = page.getViewport({ scale });
+          const c = document.createElement('canvas');
+          c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+          const g = c.getContext('2d');
+          g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+          await page.render({ canvasContext: g, viewport: vp }).promise;
+          const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9));
+          c.width = c.height = 0;
+          page.cleanup();
+          out.push({ name: stem(f.name) + (n > 1 ? '_' + pad(i, n) + '쪽' : '') + '.jpg', blob });
+        }
+      } finally { view.destroy(); }
+    }
+    return out;
+  }
+
   // ── 쪽 고르기 화면 ──
   /**
    * @param {File[]} files
@@ -241,5 +295,5 @@
     return { close };
   }
 
-  window.TukPdf = { merge, edit };
+  window.TukPdf = { merge, edit, split, toJpg };
 })();

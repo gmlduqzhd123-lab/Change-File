@@ -14,13 +14,14 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using Wic = System.Windows.Media.Imaging;
 
 namespace Tuk
 {
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "0.3.0";
+        public const string Version = "0.4.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -236,7 +237,7 @@ namespace Tuk
     // ───────────── 무엇을 할 수 있는지 ─────────────
     static class Kinds
     {
-        static readonly string[] Images = { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff" };
+        static readonly string[] Images = { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff", ".heic", ".heif" };
         static readonly string[] Word = { ".doc", ".docx", ".rtf", ".odt", ".txt" };
         static readonly string[] Excel = { ".xls", ".xlsx", ".csv" };
         static readonly string[] Ppt = { ".ppt", ".pptx" };
@@ -250,6 +251,7 @@ namespace Tuk
         public static bool IsHwp(string f) { return File.Exists(f) && Hwp.Contains(Ext(f)); }
         public static bool IsZip(string f) { return File.Exists(f) && Ext(f) == ".zip"; }
         public static bool IsPdfFile(string f) { return File.Exists(f) && Ext(f) == ".pdf"; }
+        public static bool IsHeic(string f) { return Ext(f) == ".heic" || Ext(f) == ".heif"; }
         public static bool ToPdf(string f) { return IsImage(f) || IsWord(f) || IsExcel(f) || IsPpt(f) || IsHwp(f); }
     }
 
@@ -268,6 +270,8 @@ namespace Tuk
             int img = files.Count(Kinds.IsImage);
             if (pdf > 0) list.Add(new MenuChoice("pdf", "PDF로", pdf + "개 파일을 각각 PDF로"));
             if (img > 1) list.Add(new MenuChoice("pdfall", "PDF 하나로 묶기", "그림 " + img + "장을 PDF 한 개로"));
+            int heic = files.Count(f => Kinds.IsImage(f) && Kinds.IsHeic(f));
+            if (heic > 0) list.Add(new MenuChoice("tojpg", "JPG로 바꾸기 (아이폰 사진)", "HEIC " + heic + "장을 어디서나 열리는 JPG로 · 크기 그대로"));
             if (img > 0) list.Add(new MenuChoice("shrink", "그림 용량 줄이기", "크기를 골라요 · JPG"));
             if (files.Any(Kinds.IsPdfFile)) list.Add(new MenuChoice("pdfweb", "PDF 합치기·쪽 고르기 (웹)", "웹 버전을 열어요. 파일을 거기에 놓으면 돼요."));
             list.Add(new MenuChoice("zip", "ZIP으로 묶기", "고른 것을 압축 파일 하나로"));
@@ -306,6 +310,17 @@ namespace Tuk
                             if (done > 1) r.Notes.Insert(0, done + "장 합계 " + Paths.Size(before) + " → " + Paths.Size(after));
                             break;
                         }
+                    case "tojpg":
+                        foreach (var f in files.Where(x => Kinds.IsImage(x) && Kinds.IsHeic(x)))
+                            Safe(r, f, delegate
+                            {
+                                byte[] jpg;
+                                using (var img = Pictures.LoadUpright(f)) jpg = Pictures.Jpeg(img, 0, 90);
+                                string outPath = Paths.Beside(f, "", ".jpg");
+                                File.WriteAllBytes(outPath, jpg);
+                                r.Made.Add(outPath);
+                            });
+                        break;
                     case "zip": Safe(r, files[0], delegate { r.Made.Add(Zipper.Pack(files)); }); break;
                     case "unzip": foreach (var f in files) Safe(r, f, delegate { r.Made.Add(Zipper.Unpack(f)); }); break;
                     default: r.Problems.Add("모르는 동작: " + id); break;
@@ -378,6 +393,15 @@ namespace Tuk
             byte[] jpg;
             using (var img = Pictures.LoadUpright(f)) jpg = Pictures.Jpeg(img, side, 80);
             after = jpg.Length;
+            // 아이폰 사진(HEIC)은 JPG가 더 커도 바꾼다. 어디서나 열리는 JPG가 목적이다.
+            if (Kinds.IsHeic(f))
+            {
+                string heicOut = Paths.Beside(f, "_줄임", ".jpg");
+                File.WriteAllBytes(heicOut, jpg);
+                r.Made.Add(heicOut);
+                r.Notes.Add(Path.GetFileName(f) + " → JPG " + Paths.Size(jpg.Length));
+                return false;
+            }
             if (jpg.Length >= before)
             {
                 r.Notes.Add(Path.GetFileName(f) + "은(는) 이미 충분히 작아요.");
@@ -421,30 +445,73 @@ namespace Tuk
         /// 사진의 회전 정보(EXIF)를 반영해 바로 선 그림으로 읽는다. 파일은 잠그지 않는다.
         public static Image LoadUpright(string path)
         {
+            if (Kinds.IsHeic(path)) return LoadHeic(path);
             Image img;
             using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var src = Open(fs))
             {
                 img = new Bitmap(src);
                 if (src.PropertyIdList.Contains(0x0112))
-                {
-                    int o = BitConverter.ToUInt16(src.GetPropertyItem(0x0112).Value, 0);
-                    RotateFlipType t;
-                    switch (o)
-                    {
-                        case 2: t = RotateFlipType.RotateNoneFlipX; break;
-                        case 3: t = RotateFlipType.Rotate180FlipNone; break;
-                        case 4: t = RotateFlipType.Rotate180FlipX; break;
-                        case 5: t = RotateFlipType.Rotate90FlipX; break;
-                        case 6: t = RotateFlipType.Rotate90FlipNone; break;
-                        case 7: t = RotateFlipType.Rotate270FlipX; break;
-                        case 8: t = RotateFlipType.Rotate270FlipNone; break;
-                        default: t = RotateFlipType.RotateNoneFlipNone; break;
-                    }
-                    img.RotateFlip(t);
-                }
+                    Orient(img, BitConverter.ToUInt16(src.GetPropertyItem(0x0112).Value, 0));
             }
             return img;
+        }
+
+        static void Orient(Image img, int o)
+        {
+            RotateFlipType t;
+            switch (o)
+            {
+                case 2: t = RotateFlipType.RotateNoneFlipX; break;
+                case 3: t = RotateFlipType.Rotate180FlipNone; break;
+                case 4: t = RotateFlipType.Rotate180FlipX; break;
+                case 5: t = RotateFlipType.Rotate90FlipX; break;
+                case 6: t = RotateFlipType.Rotate90FlipNone; break;
+                case 7: t = RotateFlipType.Rotate270FlipX; break;
+                case 8: t = RotateFlipType.Rotate270FlipNone; break;
+                default: return;
+            }
+            img.RotateFlip(t);
+        }
+
+        public const string HeicHelp = "아이폰 사진(HEIC)을 읽지 못했어요. Microsoft Store에서 'HEIF 이미지 확장'과 'HEVC 비디오 확장'을 설치하면 읽을 수 있어요.";
+
+        /// 아이폰 사진(HEIC)은 윈도우 그림 부품(WIC)으로 읽는다. HEIF·HEVC 확장이 있어야 한다.
+        static Image LoadHeic(string path)
+        {
+            Wic.BitmapFrame frame;
+            int orient = 1;
+            try
+            {
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    var dec = Wic.BitmapDecoder.Create(fs, Wic.BitmapCreateOptions.PreservePixelFormat, Wic.BitmapCacheOption.OnLoad);
+                    frame = dec.Frames[0];
+                    try
+                    {
+                        var md = frame.Metadata as Wic.BitmapMetadata;
+                        object o = md != null ? md.GetQuery("System.Photo.Orientation") : null;
+                        if (o != null) orient = Convert.ToInt32(o, CultureInfo.InvariantCulture);
+                    }
+                    catch { /* 회전 정보가 없으면 그대로 */ }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Environment.GetEnvironmentVariable("TUK_DEBUG") == "1") Console.Error.WriteLine(ex.ToString());
+                throw new Exception(HeicHelp);
+            }
+            var enc = new Wic.BmpBitmapEncoder();
+            enc.Frames.Add(Wic.BitmapFrame.Create(new Wic.FormatConvertedBitmap(frame, System.Windows.Media.PixelFormats.Bgr24, null, 0)));
+            using (var ms = new MemoryStream())
+            {
+                enc.Save(ms);
+                ms.Position = 0;
+                Bitmap img;
+                using (var tmp = new Bitmap(ms)) img = new Bitmap(tmp);
+                Orient(img, orient);
+                return img;
+            }
         }
 
         static Image Open(Stream s)

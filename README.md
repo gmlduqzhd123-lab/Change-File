@@ -9,7 +9,8 @@
 | 할 일 | 웹 | 윈도우 |
 |---|---|---|
 | 그림 → PDF (하나로 묶기 포함) | ✓ | ✓ |
-| PDF 합치기 · 쪽 빼기·돌리기·순서 바꾸기 | ✓ | 메뉴에서 웹 버전을 열어 줌 |
+| PDF 합치기 · 쪽 빼기·돌리기·순서 바꾸기 · 쪽마다 나누기 · PDF → JPG | ✓ | 메뉴에서 웹 버전을 열어 줌 |
+| 아이폰 사진(HEIC) → JPG | 사파리만 | ✓ (HEIF·HEVC 확장 필요, WIC로 읽음) |
 | 한글(HWP·HWPX)·워드·엑셀·PPT → PDF | | ✓ (한컴오피스·MS 오피스 필요) |
 | 그림 용량 줄이기 (긴 쪽 1024·1600·2560px 중 골라 JPG) | ✓ | ✓ |
 | ZIP 묶기·풀기 (CP949 한글 이름 포함) | ✓ | ✓ |
@@ -49,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 저장소 **Settings → Pages → Build and deployment**에서 Source를 **Deploy from a branch**, Branch를 **main / docs**로 정하고 저장합니다.
 
 ## 시험
-- 창 없이 동작 시험: `Tuk.exe /run <pdf|pdfall|shrink-s|shrink|shrink-l|zip|unzip> 파일...` (종료 코드 = 문제 개수, 안내는 표준 출력, 문제는 표준 오류)
+- 창 없이 동작 시험: `Tuk.exe /run <pdf|pdfall|tojpg|shrink-s|shrink|shrink-l|zip|unzip> 파일...` (종료 코드 = 문제 개수, 안내는 표준 출력, 문제는 표준 오류)
 - 알림 창까지 시험: `Tuk.exe /run-ui <동작> 파일...` (메뉴를 건너뛰고 결과 알림을 띄움)
 - PowerShell에서는 창 프로그램이라 기다리지 않으므로 `Start-Process -Wait -PassThru`로 실행합니다.
 - 업데이트 시험: `TUK_UPDATE_BASE=http://127.0.0.1:포트/`를 정하고 `Tuk.exe /update-check` 또는 `/update-apply`

@@ -2,7 +2,8 @@
 (() => {
   'use strict';
 
-  const IMG = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
+  const IMG = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'];
+  const HEIC = ['heic', 'heif'];
   const OFFICE = ['hwp', 'hwpx', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'rtf', 'odt'];
   const $ = (s) => document.querySelector(s);
   const drop = $('#drop'), picker = $('#picker'), filesEl = $('#files'), actionsEl = $('#actions');
@@ -24,6 +25,7 @@
   const isImg = (it) => IMG.includes(ext(it.file.name));
   const isZip = (it) => ext(it.file.name) === 'zip';
   const isPdf = (it) => ext(it.file.name) === 'pdf';
+  const isHeic = (it) => HEIC.includes(ext(it.file.name));
   const pagesEl = $('#pages');
   const isOffice = (it) => OFFICE.includes(ext(it.file.name));
   const size = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(b / 1024)) + 'KB';
@@ -104,8 +106,12 @@
     const choices = [];
     if (pdfs > 1) choices.push(['merge', 'PDF 합치기 (' + pdfs + '개)']);
     if (pdfs > 0) choices.push(['pages', pdfs > 1 ? '쪽 고르기·돌리기 (합쳐서)' : '쪽 빼기·돌리기·순서']);
+    if (pdfs > 0) choices.push(['split', '쪽마다 나누기']);
+    if (pdfs > 0) choices.push(['pdfjpg', 'PDF → JPG 그림']);
     if (imgs > 0) choices.push(['pdf', imgs > 1 ? '그림마다 PDF로' : 'PDF로']);
     if (imgs > 1) choices.push(['pdfall', 'PDF 하나로 묶기 (' + imgs + '장)']);
+    const heics = items.filter(isHeic).length;
+    if (heics > 0) choices.push(['tojpg', 'JPG로 바꾸기 (아이폰 사진 ' + heics + '장)']);
     if (imgs > 0) choices.push(['shrink', '그림 용량 줄이기']);
     if (items.length > 0) choices.push(['zip', 'ZIP으로 묶기']);
     if (items.length > 0 && items.every(isZip)) choices.push(['unzip', '압축 풀기']);
@@ -136,10 +142,15 @@
     });
 
     const office = items.filter(isOffice).length;
-    if (office > 0) {
+    const notice = [];
+    if (office > 0) notice.push('<b>한글·워드·엑셀·PPT 문서 ' + office + '개</b>는 웹에서 PDF로 바꿀 수 없어요.');
+    // 사파리 말고는 대부분 HEIC를 못 읽는다
+    if (heics > 0 && !/^((?!chrome|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent))
+      notice.push('<b>아이폰 사진(HEIC)</b>은 크롬·엣지에서 못 읽을 수 있어요.');
+    if (notice.length > 0) {
       hintEl.hidden = false;
       hintEl.className = 'hint office';
-      hintEl.innerHTML = '<span><b>한글·워드·엑셀·PPT 문서 ' + office + '개</b>는 웹에서 PDF로 바꿀 수 없어요. 윈도우 프로그램은 탐색기에서 바로 바꿔요.</span>' +
+      hintEl.innerHTML = '<span>' + notice.join(' ') + ' 윈도우 프로그램은 탐색기에서 바로 바꿔요.</span>' +
         '<a class="btn small primary" href="download/Tuk.zip" download>윈도우 프로그램 받기</a>';
     } else hintEl.hidden = true;
   }
@@ -239,6 +250,25 @@
       if (id === 'merge') {
         const m = await window.TukPdf.merge(items.filter(isPdf).map((x) => x.file), setStatus);
         addResult(m.name, m.blob, m.pages + '쪽 · ' + size(m.blob.size));
+      } else if (id === 'tojpg') {
+        const hs = items.filter(isHeic);
+        for (let i = 0; i < hs.length; i++) {
+          const f = hs[i].file;
+          setStatus('JPG로 바꾸는 중… ' + (i + 1) + '/' + hs.length);
+          try {
+            const j = await toJpeg(f, 0, 0.9);
+            addResult(stem(f.name) + '.jpg', new Blob([j.bytes], { type: 'image/jpeg' }), size(j.bytes.length));
+          } catch (e) { problems.push(f.name + ': ' + why(e)); }
+        }
+      } else if (id === 'split' || id === 'pdfjpg') {
+        const pdfFiles = items.filter(isPdf).map((x) => x.file);
+        // PDF 하나가 망가져도 나머지는 계속한다
+        for (const f of pdfFiles) {
+          try {
+            const made = await (id === 'split' ? window.TukPdf.split([f], setStatus) : window.TukPdf.toJpg([f], setStatus));
+            for (const r of made) addResult(r.name, r.blob);
+          } catch (e) { problems.push(why(e)); }
+        }
       } else if (id === 'pdf') {
         for (let i = 0; i < imgs.length; i++) {
           setStatus('PDF로 바꾸는 중… ' + (i + 1) + '/' + imgs.length);
@@ -255,6 +285,11 @@
           setStatus('용량 줄이는 중… ' + (i + 1) + '/' + imgs.length);
           try {
             const j = await toJpeg(f, shrinkSide, 0.8);
+            if (HEIC.includes(ext(f.name))) {
+              // 아이폰 사진은 JPG가 더 커도 바꾼다 (어디서나 열리게)
+              addResult(stem(f.name) + '_줄임.jpg', new Blob([j.bytes], { type: 'image/jpeg' }), 'HEIC → JPG · ' + size(j.bytes.length));
+              continue;
+            }
             if (j.bytes.length >= f.size) { notes.push(f.name + '은(는) 이미 충분히 작아요'); continue; }
             addResult(stem(f.name) + '_줄임.jpg', new Blob([j.bytes], { type: 'image/jpeg' }), size(f.size) + ' → ' + size(j.bytes.length));
             before += f.size; after += j.bytes.length; done++;
@@ -322,6 +357,10 @@
         img.src = url;
         await img.decode();
         return img;
+      } catch (e) {
+        // 아이폰 사진(HEIC)은 사파리만 읽는다
+        if (HEIC.includes(ext(file.name))) throw new Error('이 브라우저는 아이폰 사진(HEIC)을 읽지 못해요. 사파리에서 열거나 윈도우 프로그램을 써 주세요');
+        throw e;
       } finally { URL.revokeObjectURL(url); }
     }
   }

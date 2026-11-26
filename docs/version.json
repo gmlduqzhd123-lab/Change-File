@@ -1,9 +1,9 @@
 {
-    "version":  "0.3.0",
+    "version":  "0.4.0",
     "url":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.exe",
-    "sha256":  "be57c2140db4593574941eb903cd957199ad7257a7714dd5d73c6a2fe173a7ed",
-    "notes":  "PDF 합치기·쪽 고르기(웹)를 보내기 메뉴에서 열 수 있어요. 웹 버전에서 PDF를 합치고, 쪽을 빼거나 돌리고, 순서를 바꿀 수 있어요.",
+    "sha256":  "207682942b0b3f1698a80677e7542d184d2d858342c41685ccec9123bb155606",
+    "notes":  "아이폰 사진(HEIC)을 JPG로 바꾸고, PDF로 만들고, 용량을 줄일 수 있어요. 웹 버전에서 PDF를 쪽마다 나누거나 JPG 그림으로 바꿀 수 있어요.",
     "zip":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.zip",
-    "zipBytes":  26920,
+    "zipBytes":  27952,
     "date":  "2026-11-26"
 }

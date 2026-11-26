@@ -12,7 +12,8 @@ $out = Join-Path $root 'build'
 New-Item -ItemType Directory -Force $out | Out-Null
 
 $refs = 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll',
-        'Microsoft.CSharp.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll' |
+        'Microsoft.CSharp.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll',
+        'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll', 'System.Xaml.dll' |
         ForEach-Object { "/reference:" + (Join-Path $fw $_) }
 
 $src = Join-Path $root 'src\Tuk.cs'
