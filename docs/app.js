@@ -35,6 +35,23 @@
   const size = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(b / 1024)) + 'KB';
   const topName = (it) => it.path.split('/')[0];
 
+  // ── 카메라로 찍기 (휴대폰·태블릿) ──
+  // 찍을 때마다 목록에 더한다. 이름이 늘 image.jpg라서 찍은 순서대로 이름을 붙인다.
+  const camera = $('#camera');
+  let shots = 0;
+  if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) $('#more').hidden = false;
+  $('#camBtn').addEventListener('click', () => camera.click());
+  camera.addEventListener('change', () => {
+    const f = camera.files && camera.files[0];
+    camera.value = '';
+    if (!f || busy) return;
+    shots++;
+    const name = '찍은사진_' + String(shots).padStart(2, '0') + '.' + (ext(f.name) || 'jpg');
+    const kept = items.filter(isImg);
+    setItems(kept.concat([{ file: new File([f], name, { type: f.type || 'image/jpeg', lastModified: Date.now() }), path: name }]));
+    setStatus(kept.length + 1 + '장이에요. 더 찍거나, 아래에서 PDF로 묶으세요.');
+  });
+
   // ── 파일 받기 ──
   drop.addEventListener('click', () => picker.click());
   drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); } });
@@ -181,6 +198,7 @@
     results = [];
     resultsEl.innerHTML = '';
     resultBar.hidden = true;
+    shareBtn.hidden = true;
     setStatus('');
   }
 
@@ -195,7 +213,25 @@
     a.href = r.url;
     a.download = name.split('/').pop();
     resultsEl.appendChild(li);
+    updateShare();
   }
+
+  // ── 공유하기 (휴대폰의 공유 창: 카카오톡·메일 등) ──
+  // 파일은 이 기기 안에서 공유 창으로만 넘어가고, 툭은 어디로도 보내지 않는다.
+  const shareBtn = $('#shareAll');
+  const asFiles = (list) => list.map((r) => new File([r.blob], r.name.split('/').pop(), { type: r.blob.type || 'application/octet-stream' }));
+  function canShare(list) {
+    try { return list.length > 0 && !!navigator.canShare && navigator.canShare({ files: asFiles(list) }); } catch (_) { return false; }
+  }
+  function updateShare() {
+    const ok = results.length <= 10 && canShare(results);
+    shareBtn.hidden = !ok;
+    shareBtn.textContent = results.length > 1 ? results.length + '개 공유하기' : '공유하기';
+  }
+  shareBtn.addEventListener('click', async () => {
+    try { await navigator.share({ files: asFiles(results) }); }
+    catch (e) { if (!e || e.name !== 'AbortError') setStatus('공유하지 못했어요. 받기를 눌러 저장해 주세요.', true); }
+  });
 
   $('#clear').addEventListener('click', () => { closeEditor(); items = []; clearResults(); render(); });
 
@@ -213,6 +249,7 @@
         done: (blob, name, note) => {
           for (const r of results) if (r.url) URL.revokeObjectURL(r.url);
           results = []; resultsEl.innerHTML = '';
+          shareBtn.hidden = true;
           addResult(name, blob, note + ' · ' + size(blob.size));
           setStatus('다 됐어요. 받기를 누르세요. 더 고쳐서 다시 만들 수도 있어요.');
           resultBar.hidden = false;

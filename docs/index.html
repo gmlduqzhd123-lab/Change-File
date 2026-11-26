@@ -66,6 +66,10 @@ section .lead { color: var(--muted); margin: 0 0 24px; }
 .drop.over { background: var(--accent-soft); border-color: var(--accent); }
 .drop b { display: block; font-size: 19px; margin-bottom: 4px; }
 .drop span { color: var(--muted); font-size: 15px; }
+.more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
+.more span { color: var(--muted); font-size: 13px; }
+.thumb.lifted { opacity: .85; transform: scale(1.04); box-shadow: 0 8px 20px rgba(0,0,0,.22); }
+.thumb { touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .files { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 6px; }
 .files li { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--sheet2); border-radius: 10px; font-size: 14px; }
 .files li .kind { flex: none; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 6px; background: var(--sheet); color: var(--muted); }
@@ -200,6 +204,8 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
           <span>또는 눌러서 고르기 · PDF · 그림(JPG·PNG·HEIC 등) · ZIP · 아무 파일</span>
         </div>
         <input type="file" id="picker" multiple class="sr" tabindex="-1">
+        <input type="file" id="camera" accept="image/*" capture="environment" class="sr" tabindex="-1">
+        <div class="more" id="more" hidden><button class="btn small" id="camBtn" type="button">카메라로 찍기</button><span>찍을 때마다 아래 목록에 더해져요</span></div>
         <ul class="files" id="files"></ul>
         <div class="actions" id="actions"></div>
         <p class="hint" id="hint" hidden></p>
@@ -208,6 +214,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
         <div class="status" id="status" role="status" aria-live="polite"></div>
         <ul class="results" id="results"></ul>
         <div class="bar" id="resultBar" hidden>
+          <button class="btn small primary" id="shareAll" type="button" hidden>공유하기</button>
           <button class="btn small" id="zipAll" type="button">결과를 ZIP 하나로 받기</button>
           <button class="btn small" id="clear" type="button">처음부터</button>
         </div>
@@ -220,7 +227,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
       <h2>할 수 있는 일</h2>
       <p class="lead">놓은 파일에 맞는 단추만 보여요. 결과는 원본과 다른 새 파일이에요.</p>
       <div class="grid">
-        <div class="card feature"><h3><span class="dot" style="background:#E86E3C"></span>PDF로</h3><p>그림을 A4 PDF로. 여러 장은 하나로 묶고, 순서·방향·여백도 골라요. 윈도우 프로그램은 한글·워드·엑셀·PPT도 PDF로 바꿔요.</p></div>
+        <div class="card feature"><h3><span class="dot" style="background:#E86E3C"></span>PDF로</h3><p>그림을 A4 PDF로. 여러 장은 하나로 묶고, 순서·방향·여백도 골라요. 휴대폰은 카메라로 바로 찍어 묶고 카카오톡 등으로 공유해요. 윈도우 프로그램은 한글·워드·엑셀·PPT도 PDF로 바꿔요.</p></div>
         <div class="card feature"><h3><span class="dot" style="background:#3C8CE8"></span>그림 용량 줄이기</h3><p>작게(1024)·보통(1600)·크게(2560) 중에 골라 JPG로. 알림장·메일에 올리기 좋아요. 사진 회전도 바로잡아요.</p></div>
         <div class="card feature"><h3><span class="dot" style="background:#8A5CD6"></span>PDF 손질</h3><p>PDF 여러 개를 하나로 합치고, 쪽을 빼거나 돌리고, 순서를 바꿔요. 쪽 번호·워터마크(한글 가능)를 넣고, 쪽마다 나누거나 JPG 그림으로도 바꿔요. 스캔한 PDF는 용량을 크게 줄여요.</p></div>
         <div class="card feature"><h3><span class="dot" style="background:#2F8F5B"></span>ZIP 묶기·풀기</h3><p>여러 파일·폴더를 ZIP 하나로 묶거나, 받은 ZIP을 풀어요. 한글 이름이 깨진 ZIP도 읽어요.</p></div>
@@ -238,6 +245,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
           <tbody>
             <tr><td>그림 → PDF (하나로 묶기 포함)</td><td class="y">돼요</td><td class="y">돼요</td></tr>
             <tr><td>사진 순서 정해서 묶기</td><td class="y">돼요</td><td class="n">이름 순서로</td></tr>
+            <tr><td>카메라로 찍어 묶기 · 공유하기</td><td class="y">휴대폰·태블릿</td><td class="n">—</td></tr>
             <tr><td>그림 돌리기</td><td class="y">순서 정하기에서</td><td class="y">돼요</td></tr>
             <tr><td>PDF → JPG 그림</td><td class="y">돼요</td><td class="y">돼요</td></tr>
             <tr><td>PDF 합치기 · 쪽 빼기·돌리기·순서 · 쪽 번호 · 워터마크 · 나누기 · 스캔본 줄이기</td><td class="y">돼요</td><td class="n">웹으로 연결</td></tr>

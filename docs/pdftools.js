@@ -334,8 +334,8 @@
     mount.hidden = false;
     mount.innerHTML =
       (photos
-        ? '<div class="pages-head"><b>사진 순서 정하기</b><span>사진을 끌어 옮기거나 <b>앞으로</b>·<b>뒤로</b>로 순서를 바꾸고, <b>돌리기</b>·<b>빼기</b>도 할 수 있어요. 사진 한 장이 A4 한 쪽이 돼요.</span></div>'
-        : '<div class="pages-head"><b>쪽 고르기</b><span>쪽마다 <b>빼기</b>·<b>돌리기</b>를 누르고, 쪽을 끌어 옮기거나 <b>앞으로</b>·<b>뒤로</b>로 순서를 바꿔요.</span></div>') +
+        ? '<div class="pages-head"><b>사진 순서 정하기</b><span>사진을 끌어(휴대폰은 꾹 눌러서) 옮기거나 <b>앞으로</b>·<b>뒤로</b>로 순서를 바꾸고, <b>돌리기</b>·<b>빼기</b>도 할 수 있어요. 사진 한 장이 A4 한 쪽이 돼요.</span></div>'
+        : '<div class="pages-head"><b>쪽 고르기</b><span>쪽마다 <b>빼기</b>·<b>돌리기</b>를 누르고, 쪽을 끌어(휴대폰은 꾹 눌러서) 옮기거나 <b>앞으로</b>·<b>뒤로</b>로 순서를 바꿔요.</span></div>') +
       '<ol class="thumbs"></ol>' +
       '<div class="bar"><button type="button" class="btn primary" data-act="make"></button>' +
       '<button type="button" class="btn small" data-act="reset">처음대로</button>' +
@@ -353,6 +353,7 @@
     }, { rootMargin: '200px' });
     const cards = new Map();
     let dragId = null;
+    const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 
     async function draw(card) {
       const p = pages.find((x) => x.id === Number(card.dataset.id));
@@ -385,7 +386,8 @@
       li = document.createElement('li');
       li.className = 'thumb';
       li.dataset.id = String(p.id);
-      li.draggable = true;
+      // 마우스는 끌어다 놓기, 손가락은 아래의 '꾹 눌러 끌기'
+      li.draggable = !coarse;
       li.innerHTML =
         '<div class="paper"><canvas></canvas></div>' +
         '<div class="cap"><span class="no"></span><span class="from"></span></div>' +
@@ -413,15 +415,60 @@
       li.addEventListener('drop', (e) => {
         if (dragId === null) return;
         e.preventDefault(); e.stopPropagation();
-        const from = pages.findIndex((x) => x.id === dragId);
-        const moved = pages.splice(from, 1)[0];
-        const to = pages.findIndex((x) => x.id === p.id);
-        pages.splice(from <= to ? to + 1 : to, 0, moved);
-        layout();
+        move(dragId, p.id);
       });
+      touchDrag(li, p);
       cards.set(p.id, li);
       seen.observe(li);
       return li;
+    }
+
+    function move(fromId, toId) {
+      if (fromId === toId) return;
+      const from = pages.findIndex((x) => x.id === fromId);
+      const moved = pages.splice(from, 1)[0];
+      const to = pages.findIndex((x) => x.id === toId);
+      pages.splice(from <= to ? to + 1 : to, 0, moved);
+      layout();
+    }
+
+    // 손가락: 0.3초쯤 꾹 누르면 집어 들고, 놓을 자리 위에서 떼면 옮긴다. 그 전에 움직이면 화면 넘기기.
+    function touchDrag(li, p) {
+      let timer = null, holding = false, sx = 0, sy = 0, target = null;
+      const clearOver = () => grid.querySelectorAll('.over').forEach((x) => x.classList.remove('over'));
+      const stop = () => {
+        clearTimeout(timer); timer = null;
+        if (holding) { holding = false; li.classList.remove('dragging', 'lifted'); clearOver(); }
+      };
+      li.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' || e.target.closest('button')) return;
+        sx = e.clientX; sy = e.clientY; target = null;
+        timer = setTimeout(() => {
+          holding = true;
+          li.classList.add('dragging', 'lifted');
+          if (navigator.vibrate) navigator.vibrate(15);
+        }, 300);
+      });
+      li.addEventListener('pointermove', (e) => {
+        if (e.pointerType === 'mouse') return;
+        if (!holding) {
+          if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) { clearTimeout(timer); timer = null; }
+          return;
+        }
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        const over = under && under.closest('.thumb');
+        clearOver();
+        target = over && over !== li && grid.contains(over) ? over : null;
+        if (target) target.classList.add('over');
+      });
+      li.addEventListener('pointerup', () => {
+        if (holding && target) move(p.id, Number(target.dataset.id));
+        stop();
+      });
+      li.addEventListener('pointercancel', stop);
+      // 집어 든 동안에는 화면이 같이 움직이지 않게
+      li.addEventListener('touchmove', (e) => { if (holding) e.preventDefault(); }, { passive: false });
+      li.addEventListener('contextmenu', (e) => { if (timer || holding) e.preventDefault(); });
     }
 
     function layout() {
