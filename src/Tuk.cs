@@ -24,7 +24,7 @@ namespace Tuk
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "0.6.0";
+        public const string Version = "0.7.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -276,6 +276,7 @@ namespace Tuk
             int heic = files.Count(f => Kinds.IsImage(f) && Kinds.IsHeic(f));
             if (heic > 0) list.Add(new MenuChoice("tojpg", "JPG로 바꾸기 (아이폰 사진)", "HEIC " + heic + "장을 어디서나 열리는 JPG로 · 크기 그대로"));
             if (img > 0) list.Add(new MenuChoice("shrink", "그림 용량 줄이기", "크기를 골라요 · JPG"));
+            if (img > 0) list.Add(new MenuChoice("rotate", "그림 돌리기", "돌린 그림을 새 파일로 · 원본은 그대로"));
             int pdfs = files.Count(Kinds.IsPdfFile);
             if (pdfs > 0) list.Add(new MenuChoice("pdfjpg", "PDF → JPG 그림", "쪽마다 JPG 한 장 · 여러 쪽이면 새 폴더에"));
             if (pdfs > 0) list.Add(new MenuChoice("pdfweb", "PDF 합치기·쪽 고르기 (웹)", "쪽 번호·워터마크·스캔본 줄이기도 웹 버전에서 해요. 파일을 거기에 놓으면 돼요."));
@@ -333,7 +334,12 @@ namespace Tuk
                     case "pdfall":
                     case "pdfall-n":
                     case "pdfall-0":
-                        Safe(r, files[0], delegate { ImagesToOnePdf(r, files.Where(Kinds.IsImage).ToList(), MarginOf(id)); }); break;
+                        // 보내기 메뉴는 고른 순서가 들쭉날쭉하니 이름 순서(1, 2, 10…)로 묶는다
+                        Safe(r, files[0], delegate { ImagesToOnePdf(r, Paths.Natural(files.Where(Kinds.IsImage)), MarginOf(id)); }); break;
+                    case "rotr":
+                    case "rotl":
+                        each(files.Where(Kinds.IsImage), delegate (string f) { r.Made.Add(Pictures.Rotate(f, id == "rotr")); });
+                        break;
                     case "pdfjpg":
                         {
                             var pdfs = files.Where(Kinds.IsPdfFile).ToList();
@@ -482,6 +488,16 @@ namespace Tuk
 
     static class Paths
     {
+        [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)] static extern int StrCmpLogicalW(string a, string b);
+
+        /// 탐색기와 같은 이름 순서 (사진2가 사진10보다 앞)
+        public static List<string> Natural(IEnumerable<string> files)
+        {
+            var list = files.ToList();
+            list.Sort((a, b) => StrCmpLogicalW(Path.GetFileName(a), Path.GetFileName(b)));
+            return list;
+        }
+
         /// 원본 옆에 겹치지 않는 새 이름. 겹치면 ' (2)'를 붙인다.
         public static string Beside(string original, string suffix, string ext)
         {
@@ -584,6 +600,21 @@ namespace Tuk
             try { return Image.FromStream(s); }
             catch (ArgumentException) { throw new Exception("그림 파일이 손상됐거나 읽을 수 없는 형식이에요."); }
             catch (OutOfMemoryException) { throw new Exception("그림 파일이 손상됐거나 읽을 수 없는 형식이에요."); }
+        }
+
+        /// 90도 돌린 새 파일을 원본 옆에 만든다. 사진(JPG·HEIC)은 JPG로, 나머지는 화질 손실 없는 PNG로.
+        public static string Rotate(string path, bool right)
+        {
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            bool photo = ext == ".jpg" || ext == ".jpeg" || Kinds.IsHeic(path);
+            using (var img = LoadUpright(path))
+            {
+                img.RotateFlip(right ? RotateFlipType.Rotate90FlipNone : RotateFlipType.Rotate270FlipNone);
+                string outPath = Paths.Beside(path, "_돌림", photo ? ".jpg" : ".png");
+                if (photo) File.WriteAllBytes(outPath, Jpeg(img, 0, 92));
+                else img.Save(outPath, ImageFormat.Png);
+                return outPath;
+            }
         }
 
         /// 흰 바탕 위에 다시 그려 JPEG로. maxSide 0이면 크기 그대로.
@@ -1102,6 +1133,21 @@ namespace Tuk
                         item.DropDownItems.Add(sub);
                     }
                 }
+                else if (c.Id == "rotate")
+                {
+                    var dirs = new[]
+                    {
+                        new[] { "rotr", "&1  오른쪽으로 90°", "시계 방향" },
+                        new[] { "rotl", "&2  왼쪽으로 90°", "시계 반대 방향" },
+                    };
+                    foreach (var s in dirs)
+                    {
+                        var id = s[0];
+                        var sub = new ToolStripMenuItem(s[1]) { ToolTipText = s[2] };
+                        sub.Click += delegate { chosen(id); };
+                        item.DropDownItems.Add(sub);
+                    }
+                }
                 else if ((c.Id == "pdf" && files.Where(Kinds.ToPdf).All(Kinds.IsImage)) || c.Id == "pdfall")
                 {
                     // 그림 → PDF 여백 고르기. 위 항목을 바로 누르면 '보통'.
@@ -1139,6 +1185,7 @@ namespace Tuk
         static string LabelOf(string id, IList<string> files)
         {
             if (id.StartsWith("shrink")) return "그림 용량 줄이기";
+            if (id == "rotr" || id == "rotl") return "그림 돌리기";
             if (id.StartsWith("pdfall")) id = "pdfall";
             else if (id.StartsWith("pdf-")) id = "pdf";
             return Choices.For(files).Where(c => c.Id == id).Select(c => c.Label).FirstOrDefault() ?? id;

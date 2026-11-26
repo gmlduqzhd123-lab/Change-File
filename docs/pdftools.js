@@ -302,22 +302,30 @@
   /**
    * @param {File[]} files
    * @param {HTMLElement} mount
-   * @param {{status: (t: string, bad?: boolean) => void, done: (blob: Blob, name: string, note: string) => void, closed: () => void}} cb
+   * @param {{status: (t: string, bad?: boolean) => void, done: (blob: Blob, name: string, note: string) => void, closed: () => void,
+   *   images?: (list: {file: File, rot: number}[]) => Promise<Blob>}} cb  images가 있으면 사진 순서 정하기 (사진 한 장 = 한 쪽)
    */
   async function edit(files, mount, cb) {
-    cb.status('PDF 도구를 불러오는 중…');
-    await Promise.all([needPdfLib(), needPdfJs()]);
+    const photos = typeof cb.images === 'function';
+    const unit = photos ? '장' : '쪽';
     const list = [...files].sort(byName);
     const sources = [];
     let pages = [];
-    for (let i = 0; i < list.length; i++) {
-      cb.status('PDF 여는 중… ' + (i + 1) + '/' + list.length);
-      const s = await openPdf(list[i]);
-      s.name = list[i].name;
-      s.view = await window.pdfjsLib.getDocument({ data: s.bytes.slice(), isEvalSupported: false }).promise;
-      sources.push(s);
-      for (let page = 0; page < s.doc.getPageCount(); page++) pages.push({ src: i, page, rot: 0, del: false });
-      if (pages.length > MAX_PAGES) throw new Error('쪽이 너무 많아요 (' + MAX_PAGES + '쪽까지). PDF를 나눠서 해 주세요');
+    if (photos) {
+      if (list.length > MAX_PAGES) throw new Error('사진이 너무 많아요 (' + MAX_PAGES + '장까지)');
+      list.forEach((f, i) => { sources.push({ name: f.name, file: f }); pages.push({ src: i, page: 0, rot: 0, del: false }); });
+    } else {
+      cb.status('PDF 도구를 불러오는 중…');
+      await Promise.all([needPdfLib(), needPdfJs()]);
+      for (let i = 0; i < list.length; i++) {
+        cb.status('PDF 여는 중… ' + (i + 1) + '/' + list.length);
+        const s = await openPdf(list[i]);
+        s.name = list[i].name;
+        s.view = await window.pdfjsLib.getDocument({ data: s.bytes.slice(), isEvalSupported: false }).promise;
+        sources.push(s);
+        for (let page = 0; page < s.doc.getPageCount(); page++) pages.push({ src: i, page, rot: 0, del: false });
+        if (pages.length > MAX_PAGES) throw new Error('쪽이 너무 많아요 (' + MAX_PAGES + '쪽까지). PDF를 나눠서 해 주세요');
+      }
     }
     pages.forEach((p, i) => { p.id = i; });
     const original = pages.slice();
@@ -325,7 +333,9 @@
 
     mount.hidden = false;
     mount.innerHTML =
-      '<div class="pages-head"><b>쪽 고르기</b><span>쪽마다 <b>빼기</b>·<b>돌리기</b>를 누르고, 쪽을 끌어 옮기거나 <b>앞으로</b>·<b>뒤로</b>로 순서를 바꿔요.</span></div>' +
+      (photos
+        ? '<div class="pages-head"><b>사진 순서 정하기</b><span>사진을 끌어 옮기거나 <b>앞으로</b>·<b>뒤로</b>로 순서를 바꾸고, <b>돌리기</b>·<b>빼기</b>도 할 수 있어요. 사진 한 장이 A4 한 쪽이 돼요.</span></div>'
+        : '<div class="pages-head"><b>쪽 고르기</b><span>쪽마다 <b>빼기</b>·<b>돌리기</b>를 누르고, 쪽을 끌어 옮기거나 <b>앞으로</b>·<b>뒤로</b>로 순서를 바꿔요.</span></div>') +
       '<ol class="thumbs"></ol>' +
       '<div class="bar"><button type="button" class="btn primary" data-act="make"></button>' +
       '<button type="button" class="btn small" data-act="reset">처음대로</button>' +
@@ -347,6 +357,17 @@
     async function draw(card) {
       const p = pages.find((x) => x.id === Number(card.dataset.id));
       try {
+        if (photos) {
+          // 사진은 회전 정보(EXIF)를 반영해 작게 그린다
+          const bmp = await createImageBitmap(sources[p.src].file, { imageOrientation: 'from-image' });
+          const s = Math.min(150 / bmp.width, 200 / bmp.height, 1) * (window.devicePixelRatio || 1);
+          const c = card.querySelector('canvas');
+          c.width = Math.max(1, Math.round(bmp.width * s)); c.height = Math.max(1, Math.round(bmp.height * s));
+          c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+          bmp.close();
+          card.classList.add('drawn');
+          return;
+        }
         const page = await sources[p.src].view.getPage(p.page + 1);
         const vp0 = page.getViewport({ scale: 1 });
         const scale = Math.min(150 / vp0.width, 200 / vp0.height) * (window.devicePixelRatio || 1);
@@ -373,7 +394,7 @@
         '<button type="button" data-a="del"></button>' +
         '<button type="button" data-a="left">◀ 앞으로</button>' +
         '<button type="button" data-a="right">뒤로 ▶</button></div>';
-      li.querySelector('.from').textContent = sources.length > 1 ? sources[p.src].name + ' ' + (p.page + 1) + '쪽' : '';
+      li.querySelector('.from').textContent = photos ? sources[p.src].name : sources.length > 1 ? sources[p.src].name + ' ' + (p.page + 1) + '쪽' : '';
       li.addEventListener('click', (e) => {
         const a = e.target.closest('button') && e.target.closest('button').dataset.a;
         if (!a) return;
@@ -411,16 +432,16 @@
         li.classList.toggle('gone', p.del);
         li.querySelector('.paper canvas').style.transform = p.rot ? 'rotate(' + p.rot + 'deg)' : '';
         li.querySelector('.paper').classList.toggle('turned', p.rot % 180 !== 0);
-        li.querySelector('.no').textContent = p.del ? '뺌' : (++n) + '쪽';
+        li.querySelector('.no').textContent = p.del ? '뺌' : (++n) + unit;
         li.querySelector('[data-a="del"]').textContent = p.del ? '되살리기' : '✕ 빼기';
       });
-      makeBtn.textContent = n > 0 ? '이대로 PDF 만들기 (' + n + '쪽)' : '남은 쪽이 없어요';
+      makeBtn.textContent = n > 0 ? '이대로 PDF 만들기 (' + n + unit + ')' : (photos ? '남은 사진이 없어요' : '남은 쪽이 없어요');
       makeBtn.disabled = n === 0;
     }
 
     function close() {
       seen.disconnect();
-      sources.forEach((s) => { try { s.view.destroy(); } catch (_) { /* 무시 */ } });
+      sources.forEach((s) => { try { if (s.view) s.view.destroy(); } catch (_) { /* 무시 */ } });
       mount.hidden = true;
       mount.innerHTML = '';
       cb.closed();
@@ -437,12 +458,14 @@
       cb.status('PDF 만드는 중…');
       try {
         const keep = pages.filter((p) => !p.del);
-        const blob = await build(sources, keep);
+        const blob = photos
+          ? await cb.images(keep.map((p) => ({ file: sources[p.src].file, rot: p.rot })))
+          : await build(sources, keep);
         const gone = pages.length - keep.length, turned = keep.filter((p) => p.rot).length;
-        const name = stem(list[0].name) + (sources.length > 1 ? '_합침.pdf' : '_고침.pdf');
-        const what = [keep.length + '쪽'];
-        if (gone) what.push(gone + '쪽 뺌');
-        if (turned) what.push(turned + '쪽 돌림');
+        const name = stem(photos ? sources[keep[0].src].name : list[0].name) + (photos ? '_묶음.pdf' : sources.length > 1 ? '_합침.pdf' : '_고침.pdf');
+        const what = [keep.length + unit];
+        if (gone) what.push(gone + unit + ' 뺌');
+        if (turned) what.push(turned + unit + ' 돌림');
         cb.done(blob, name, what.join(' · '));
       } catch (e) {
         cb.status('PDF를 만들지 못했어요: ' + ((e && e.message) || e), true);

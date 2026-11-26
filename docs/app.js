@@ -121,6 +121,7 @@
     if (pdfs > 0) choices.push(['pdfjpg', 'PDF → JPG 그림']);
     if (imgs > 0) choices.push(['pdf', imgs > 1 ? '그림마다 PDF로' : 'PDF로']);
     if (imgs > 1) choices.push(['pdfall', 'PDF 하나로 묶기 (' + imgs + '장)']);
+    if (imgs > 1) choices.push(['arrange', '순서 정해서 묶기']);
     const heics = items.filter(isHeic).length;
     if (heics > 0) choices.push(['tojpg', 'JPG로 바꾸기 (아이폰 사진 ' + heics + '장)']);
     if (imgs > 0) choices.push(['shrink', '그림 용량 줄이기']);
@@ -199,15 +200,16 @@
   $('#clear').addEventListener('click', () => { closeEditor(); items = []; clearResults(); render(); });
 
   // ── PDF 쪽 고르기 ──
-  async function openEditor() {
+  async function openEditor(photos) {
     if (busy || editor) return;
     closeOptions();
     busy = true;
     clearResults();
     actionsEl.querySelectorAll('button').forEach((b) => (b.disabled = true));
     try {
-      editor = await window.TukPdf.edit(items.filter(isPdf).map((x) => x.file), pagesEl, {
+      editor = await window.TukPdf.edit(items.filter(photos ? isImg : isPdf).map((x) => x.file), pagesEl, {
         status: setStatus,
+        images: photos ? (list) => imagesToPdf(list, (i) => setStatus('PDF 만드는 중… ' + (i + 1) + '/' + list.length)) : undefined,
         done: (blob, name, note) => {
           for (const r of results) if (r.url) URL.revokeObjectURL(r.url);
           results = []; resultsEl.innerHTML = '';
@@ -337,7 +339,8 @@
 
   async function run(id) {
     if (FORMS[id]) return showOptions(id);
-    if (id === 'pages') return openEditor();
+    if (id === 'pages') return openEditor(false);
+    if (id === 'arrange') return openEditor(true);
     if (busy) return;
     busy = true;
     clearResults();
@@ -465,26 +468,31 @@
   }
 
   /** 흰 바탕 위에 다시 그려 JPEG로. maxSide 0이면 크기 그대로(단, 아주 큰 그림은 4000픽셀로 맞춤). */
-  async function toJpeg(file, maxSide, quality) {
+  async function toJpeg(file, maxSide, quality, rot) {
     const src = await decode(file);
     let w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+    const turn = (((rot || 0) % 360) + 360) % 360;
     const limit = maxSide || 4000;
     if (Math.max(w, h) > limit) {
       const s = limit / Math.max(w, h);
       w = Math.max(1, Math.round(w * s));
       h = Math.max(1, Math.round(h * s));
     }
+    // 돌리면 가로·세로가 바뀐다
+    const cw = turn % 180 ? h : w, ch = turn % 180 ? w : h;
     const c = document.createElement('canvas');
-    c.width = w; c.height = h;
+    c.width = cw; c.height = ch;
     const g = c.getContext('2d');
     g.fillStyle = '#fff';
-    g.fillRect(0, 0, w, h);
+    g.fillRect(0, 0, cw, ch);
     g.imageSmoothingQuality = 'high';
-    g.drawImage(src, 0, 0, w, h);
+    g.translate(cw / 2, ch / 2);
+    g.rotate(turn * Math.PI / 180);
+    g.drawImage(src, -w / 2, -h / 2, w, h);
     if (src.close) src.close();
     const blob = await new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('그림을 만들지 못했어요'))), 'image/jpeg', quality));
     c.width = c.height = 0;
-    return { bytes: new Uint8Array(await blob.arrayBuffer()), w, h };
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), w: cw, h: ch };
   }
 
   // ── PDF (그림마다 A4 한 쪽, 가로 그림은 가로 쪽) ──
@@ -504,7 +512,9 @@
     const kids = [];
     for (let i = 0; i < files.length; i++) {
       if (progress) progress(i);
-      const { bytes, w, h } = await toJpeg(files[i], 0, 0.9);
+      // files: File 또는 {file, rot} (순서 정하기에서 돌린 사진)
+      const one = files[i] instanceof Blob ? { file: files[i], rot: 0 } : files[i];
+      const { bytes, w, h } = await toJpeg(one.file, 0, 0.9, one.rot);
       const land = w > h;
       const pw = land ? A4H : A4W, ph = land ? A4W : A4H;
       const s = Math.min((pw - 2 * M) / w, (ph - 2 * M) / h);
