@@ -1,9 +1,9 @@
 {
-    "version":  "1.0.0",
+    "version":  "1.1.0",
     "url":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.exe",
-    "sha256":  "9005f369c03ef5b21fba4b05d45e071ce1845f205609514a4c51048b7f6b64b9",
-    "notes":  "툭 1.0 정식판이에요. 그동안의 기능(PDF 만들기·합치기·쪽 고르기, PDF → JPG, 그림 줄이기·돌리기, ZIP)을 다듬었어요. 웹 버전은 앱으로 설치하고 화면 캡처를 Ctrl+V로 붙여 넣을 수 있어요.",
+    "sha256":  "47ac3983223040c7c1ebe3bb5bb744995ff45a723668d1824a4c3f15e9dcb9f3",
+    "notes":  "JPG로 바꾸기가 아이폰 사진(HEIC)뿐 아니라 PNG·BMP·GIF·TIF 그림에도 나와요. 투명한 부분은 흰색이 돼요. 웹 버전은 크롬·엣지에서도 아이폰 사진을 읽고, PNG로 바꾸기도 돼요.",
     "zip":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.zip",
-    "zipBytes":  31828,
+    "zipBytes":  31943,
     "date":  "2026-11-26"
 }

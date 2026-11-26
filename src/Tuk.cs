@@ -24,7 +24,7 @@ namespace Tuk
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "1.0.0";
+        public const string Version = "1.1.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -255,6 +255,7 @@ namespace Tuk
         public static bool IsZip(string f) { return File.Exists(f) && Ext(f) == ".zip"; }
         public static bool IsPdfFile(string f) { return File.Exists(f) && Ext(f) == ".pdf"; }
         public static bool IsHeic(string f) { return Ext(f) == ".heic" || Ext(f) == ".heif"; }
+        public static bool IsJpg(string f) { return Ext(f) == ".jpg" || Ext(f) == ".jpeg"; }
         public static bool ToPdf(string f) { return IsImage(f) || IsWord(f) || IsExcel(f) || IsPpt(f) || IsHwp(f); }
     }
 
@@ -274,7 +275,9 @@ namespace Tuk
             if (pdf > 0) list.Add(new MenuChoice("pdf", "PDF로", pdf + "개 파일을 각각 PDF로"));
             if (img > 1) list.Add(new MenuChoice("pdfall", "PDF 하나로 묶기", "그림 " + img + "장을 PDF 한 개로"));
             int heic = files.Count(f => Kinds.IsImage(f) && Kinds.IsHeic(f));
-            if (heic > 0) list.Add(new MenuChoice("tojpg", "JPG로 바꾸기 (아이폰 사진)", "HEIC " + heic + "장을 어디서나 열리는 JPG로 · 크기 그대로"));
+            int notJpg = files.Count(f => Kinds.IsImage(f) && !Kinds.IsJpg(f));
+            if (notJpg > 0) list.Add(new MenuChoice("tojpg", heic == notJpg ? "JPG로 바꾸기 (아이폰 사진)" : "JPG로 바꾸기",
+                (heic == notJpg ? "HEIC " + notJpg + "장을" : "그림 " + notJpg + "장을") + " 어디서나 열리는 JPG로 · 크기 그대로"));
             if (img > 0) list.Add(new MenuChoice("shrink", "그림 용량 줄이기", "크기를 골라요 · JPG"));
             if (img > 0) list.Add(new MenuChoice("rotate", "그림 돌리기", "돌린 그림을 새 파일로 · 원본은 그대로"));
             int pdfs = files.Count(Kinds.IsPdfFile);
@@ -377,7 +380,7 @@ namespace Tuk
                             break;
                         }
                     case "tojpg":
-                        each(files.Where(x => Kinds.IsImage(x) && Kinds.IsHeic(x)), delegate (string f)
+                        each(files.Where(x => Kinds.IsImage(x) && !Kinds.IsJpg(x)), delegate (string f)
                         {
                             byte[] jpg;
                             using (var img = Pictures.LoadUpright(f)) jpg = Pictures.Jpeg(img, 0, 90);

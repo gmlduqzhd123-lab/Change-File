@@ -360,12 +360,14 @@
       try {
         if (photos) {
           // 사진은 회전 정보(EXIF)를 반영해 작게 그린다
-          const bmp = await createImageBitmap(sources[p.src].file, { imageOrientation: 'from-image' });
-          const s = Math.min(150 / bmp.width, 200 / bmp.height, 1) * (window.devicePixelRatio || 1);
+          const bmp = window.TukImage ? await window.TukImage.decode(sources[p.src].file)
+            : await createImageBitmap(sources[p.src].file, { imageOrientation: 'from-image' });
+          const bw = bmp.width || bmp.naturalWidth, bh = bmp.height || bmp.naturalHeight;
+          const s = Math.min(150 / bw, 200 / bh, 1) * (window.devicePixelRatio || 1);
           const c = card.querySelector('canvas');
-          c.width = Math.max(1, Math.round(bmp.width * s)); c.height = Math.max(1, Math.round(bmp.height * s));
+          c.width = Math.max(1, Math.round(bw * s)); c.height = Math.max(1, Math.round(bh * s));
           c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-          bmp.close();
+          if (bmp.close) bmp.close();
           card.classList.add('drawn');
           return;
         }

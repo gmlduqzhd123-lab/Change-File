@@ -30,6 +30,8 @@
   const isZip = (it) => ext(it.file.name) === 'zip';
   const isPdf = (it) => ext(it.file.name) === 'pdf';
   const isHeic = (it) => HEIC.includes(ext(it.file.name));
+  const isJpg = (it) => ['jpg', 'jpeg'].includes(ext(it.file.name));
+  const isPng = (it) => ext(it.file.name) === 'png';
   const pagesEl = $('#pages');
   const isOffice = (it) => OFFICE.includes(ext(it.file.name));
   const size = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(b / 1024)) + 'KB';
@@ -172,8 +174,11 @@
     if (imgs > 0) choices.push(['pdf', imgs > 1 ? '그림마다 PDF로' : 'PDF로']);
     if (imgs > 1) choices.push(['pdfall', 'PDF 하나로 묶기 (' + imgs + '장)']);
     if (imgs > 1) choices.push(['arrange', '순서 정해서 묶기']);
-    const heics = items.filter(isHeic).length;
-    if (heics > 0) choices.push(['tojpg', 'JPG로 바꾸기 (아이폰 사진 ' + heics + '장)']);
+    // 형식 바꾸기: JPG가 아닌 그림 → JPG, (JPG·PNG가 아닌) WEBP·HEIC·GIF·BMP → PNG
+    const notJpg = items.filter((x) => isImg(x) && !isJpg(x)).length;
+    const toPngable = items.filter((x) => isImg(x) && !isJpg(x) && !isPng(x)).length;
+    if (notJpg > 0) choices.push(['tojpg', 'JPG로 바꾸기 (' + notJpg + '장)']);
+    if (toPngable > 0) choices.push(['topng', 'PNG로 바꾸기 (' + toPngable + '장)']);
     if (imgs > 0) choices.push(['shrink', '그림 용량 줄이기']);
     if (items.length > 0) choices.push(['zip', 'ZIP으로 묶기']);
     if (items.length > 0 && items.every(isZip)) choices.push(['unzip', '압축 풀기']);
@@ -194,9 +199,6 @@
     const office = items.filter(isOffice).length;
     const notice = [];
     if (office > 0) notice.push('<b>한글·워드·엑셀·PPT 문서 ' + office + '개</b>는 웹에서 PDF로 바꿀 수 없어요.');
-    // 사파리 말고는 대부분 HEIC를 못 읽는다
-    if (heics > 0 && !/^((?!chrome|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent))
-      notice.push('<b>아이폰 사진(HEIC)</b>은 크롬·엣지에서 못 읽을 수 있어요.');
     if (notice.length > 0) {
       hintEl.hidden = false;
       hintEl.className = 'hint office';
@@ -422,16 +424,28 @@
       if (id === 'merge') {
         const m = await window.TukPdf.merge(items.filter(isPdf).map((x) => x.file), setStatus);
         addResult(m.name, m.blob, m.pages + '쪽 · ' + size(m.blob.size));
-      } else if (id === 'tojpg') {
-        const hs = items.filter(isHeic);
-        for (let i = 0; i < hs.length; i++) {
-          const f = hs[i].file;
-          setStatus('JPG로 바꾸는 중… ' + (i + 1) + '/' + hs.length);
+      } else if (id === 'tojpg' || id === 'topng') {
+        const png = id === 'topng';
+        const list = items.filter((x) => isImg(x) && !isJpg(x) && !(png && isPng(x)));
+        const used = new Set();
+        for (let i = 0; i < list.length; i++) {
+          const f = list[i].file;
+          setStatus((png ? 'PNG' : 'JPG') + '로 바꾸는 중… ' + (i + 1) + '/' + list.length);
           try {
-            const j = await toJpeg(f, 0, 0.9);
-            addResult(stem(f.name) + '.jpg', new Blob([j.bytes], { type: 'image/jpeg' }), size(j.bytes.length));
+            // 같은 이름(사진.png와 사진.webp)이 겹치면 원래 형식을 이름에 붙인다
+            let name = stem(f.name) + (png ? '.png' : '.jpg');
+            if (used.has(name)) name = stem(f.name) + '_' + ext(f.name) + (png ? '.png' : '.jpg');
+            used.add(name);
+            if (png) {
+              const b = await toPng(f);
+              addResult(name, b, ext(f.name).toUpperCase() + ' → PNG · ' + size(b.size));
+            } else {
+              const j = await toJpeg(f, 0, 0.9);
+              addResult(name, new Blob([j.bytes], { type: 'image/jpeg' }), ext(f.name).toUpperCase() + ' → JPG · ' + size(j.bytes.length));
+            }
           } catch (e) { problems.push(f.name + ': ' + why(e)); }
         }
+        if (!png && list.some((x) => !isHeic(x))) notes.push('투명한 부분은 흰색이 돼요');
       } else if (id === 'split' || id === 'pdfjpg') {
         const pdfFiles = items.filter(isPdf).map((x) => x.file);
         // PDF 하나가 망가져도 나머지는 계속한다
@@ -518,9 +532,36 @@
   }
 
   // ── 그림 ──
+  // 아이폰 사진(HEIC)을 못 읽는 브라우저(크롬·엣지 등)는 heic2any로 읽는다. HEIC를 처음 만났을 때만 불러온다.
+  const HEIC_LIB = ['https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js', 'sha384-OTofQ0MEeiSgh62havBcemCIK0gqj809wX6UA0uPISNMRnR6NZyCdGzX3SbLrgwL'];
+  let heicReady = null;
+  function needHeic() {
+    if (!heicReady) {
+      heicReady = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = HEIC_LIB[0]; s.integrity = HEIC_LIB[1]; s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('아이폰 사진을 읽는 도구를 불러오지 못했어요. 인터넷 연결을 확인해 주세요'));
+        document.head.appendChild(s);
+      }).catch((e) => { heicReady = null; throw e; });
+    }
+    return heicReady;
+  }
+  async function decodeHeic(file) {
+    const before = statusEl.textContent;
+    if (typeof window.heic2any !== 'function') setStatus('아이폰 사진을 읽는 도구를 불러오는 중… (처음 한 번)');
+    await needHeic();
+    if (before) setStatus(before);
+    let out;
+    try { out = await window.heic2any({ blob: file, toType: 'image/png' }); }
+    catch (_) { throw new Error('아이폰 사진(HEIC)을 읽지 못했어요. 파일이 손상됐거나 지원하지 않는 방식이에요'); }
+    return createImageBitmap(Array.isArray(out) ? out[0] : out);
+  }
+
   async function decode(file) {
     try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
     catch (_) {
+      if (HEIC.includes(ext(file.name))) return decodeHeic(file);
       // createImageBitmap이 못 읽는 형식(일부 BMP 등)은 <img>로 다시 시도
       const url = URL.createObjectURL(file);
       try {
@@ -530,11 +571,26 @@
         await img.decode();
         return img;
       } catch (e) {
-        // 아이폰 사진(HEIC)은 사파리만 읽는다
-        if (HEIC.includes(ext(file.name))) throw new Error('이 브라우저는 아이폰 사진(HEIC)을 읽지 못해요. 사파리에서 열거나 윈도우 프로그램을 써 주세요');
         throw e;
       } finally { URL.revokeObjectURL(url); }
     }
+  }
+
+  window.TukImage = { decode };
+
+  /** 투명한 곳은 그대로 두고 PNG로 (크기 그대로, 아주 큰 그림은 8000픽셀로 맞춤) */
+  async function toPng(file) {
+    const src = await decode(file);
+    let w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+    const k = Math.min(1, 8000 / Math.max(w, h));
+    w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(src, 0, 0, w, h);
+    if (src.close) src.close();
+    const blob = await new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('그림을 만들지 못했어요'))), 'image/png'));
+    c.width = c.height = 0;
+    return blob;
   }
 
   /** 흰 바탕 위에 다시 그려 JPEG로. maxSide 0이면 크기 그대로(단, 아주 큰 그림은 4000픽셀로 맞춤). */
