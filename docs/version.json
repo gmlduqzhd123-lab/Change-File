@@ -1,9 +1,9 @@
 {
-    "version":  "1.2.0",
+    "version":  "2.0.0",
     "url":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.exe",
-    "sha256":  "fe5505c87efbbf3e09844979b70c341324555bef7dd06a4f2d455eb4b46b2243",
-    "notes":  "PDF 하나로 묶기에서 A4 한 쪽에 사진 2장·4장씩 모아 넣을 수 있어요 (메뉴의 \u0027한 쪽에 2장/4장\u0027). 웹 버전은 6·9장과 PDF 모아 찍기(한 장에 2·4쪽)도 돼요.",
+    "sha256":  "898fb048433f261c3bc3fdd8c11d170f6315c1381f4e79684733e90bcbd48488",
+    "notes":  "보내기 → 툭 → \u0027PDF 손질\u0027을 누르면 툭 웹 창이 열리고 고른 파일이 바로 올라가요. 합치기·쪽 고르기·쪽 번호·워터마크 등 웹의 PDF 기능을 윈도우에서 바로 써요. 파일은 이 PC 밖으로 나가지 않아요.",
     "zip":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.zip",
-    "zipBytes":  32547,
-    "date":  "2026-11-26"
+    "zipBytes":  35366,
+    "date":  "2026-11-27"
 }

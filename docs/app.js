@@ -1147,9 +1147,45 @@
     }
   }
 
+  // ── 윈도우 프로그램에서 넘겨받기 ──
+  // 윈도우용 툭이 이 PC 안(127.0.0.1)에서만 잠깐 내어 주는 파일을 받아 온다. 인터넷으로는 나가지 않는다.
+  async function takeFromWindows() {
+    const m = /[?&]from=([^&#]+)/.exec(location.search);
+    if (!m) return;
+    let base = '';
+    try { base = decodeURIComponent(m[1]); } catch (_) { return; }
+    history.replaceState(null, '', location.pathname + (/[?&]app=1/.test(location.search) ? '?app=1' : '') + '#web');
+    if (!/^http:\/\/127\.0\.0\.1:\d{2,5}\/[0-9a-f]{32}\/$/.test(base)) return;
+    const get = async (u) => {
+      let r;
+      // 새 크롬·엣지는 '이 PC에 연결' 허락을 묻는다. 허락하면 받아 온다.
+      try { r = await fetch(u, { cache: 'no-store', targetAddressSpace: 'loopback' }); }
+      catch (_) { r = await fetch(u, { cache: 'no-store' }); }
+      if (!r.ok) throw new Error('받지 못했어요');
+      return r;
+    };
+    try {
+      setStatus('윈도우 프로그램에서 파일을 받는 중…');
+      const list = await (await get(base + 'list')).json();
+      const got = [];
+      for (let i = 0; i < list.length; i++) {
+        setStatus('윈도우 프로그램에서 파일을 받는 중… ' + (i + 1) + '/' + list.length);
+        const blob = await (await get(base + 'f/' + list[i].i)).blob();
+        const type = ext(list[i].name) === 'pdf' ? 'application/pdf' : '';
+        got.push({ file: new File([blob], list[i].name, { type, lastModified: list[i].time || Date.now() }), path: list[i].name });
+      }
+      if (!got.length) throw new Error('파일이 없어요');
+      setItems(got);
+      setStatus(got.length + '개를 받았어요. 아래에서 할 일을 고르세요. 결과는 \'받기\'를 누르면 다운로드 폴더에 저장돼요.');
+    } catch (_) {
+      setStatus('윈도우 프로그램에서 파일을 받아 오지 못했어요. \'이 기기에 연결\'을 묻는 창이 뜨면 허용해 주세요. 아니면 탐색기에서 파일을 여기로 끌어다 놓아도 돼요.', true);
+    }
+  }
+
   if (typeof JSZip === 'undefined') {
     setStatus('ZIP 기능을 불러오지 못했어요. 인터넷 연결을 확인하고 새로 고쳐 주세요. (PDF·용량 줄이기는 돼요)', true);
   }
   render();
   takeShared();
+  takeFromWindows();
 })();

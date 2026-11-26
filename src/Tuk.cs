@@ -10,6 +10,8 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -24,7 +26,7 @@ namespace Tuk
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "1.2.0";
+        public const string Version = "2.0.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -216,6 +218,14 @@ namespace Tuk
                 return job.Problems.Count;
             }
 
+            // 시험용: 웹 버전에 파일을 넘기는 주소만 알려 주고(표준 출력) 받아 갈 때까지 기다린다
+            if (args.Length >= 2 && args[0] == "/web-url")
+            {
+                Console.Out.WriteLine(WebHandoff.Start(args.Skip(1).Where(File.Exists).ToList(), null));
+                Console.Out.Flush();
+                return 0;
+            }
+
             // 시험용: 메뉴 없이 바로 실행하고 알림 창까지 보여 준다
             if (args.Length >= 2 && args[0] == "/run-ui")
             {
@@ -282,7 +292,7 @@ namespace Tuk
             if (img > 0) list.Add(new MenuChoice("rotate", "그림 돌리기", "돌린 그림을 새 파일로 · 원본은 그대로"));
             int pdfs = files.Count(Kinds.IsPdfFile);
             if (pdfs > 0) list.Add(new MenuChoice("pdfjpg", "PDF → JPG 그림", "쪽마다 JPG 한 장 · 여러 쪽이면 새 폴더에"));
-            if (pdfs > 0) list.Add(new MenuChoice("pdfweb", "PDF 합치기·쪽 고르기 (웹)", "쪽 번호·워터마크·스캔본 줄이기도 웹 버전에서 해요. 파일을 거기에 놓으면 돼요."));
+            if (pdfs > 0) list.Add(new MenuChoice("pdfweb", "PDF 손질 (합치기·쪽 고르기·쪽 번호 등)", "툭 웹 창이 열리고 고른 파일이 바로 올라가요 · 파일은 이 PC 밖으로 나가지 않아요"));
             list.Add(new MenuChoice("zip", "ZIP으로 묶기", "고른 것을 압축 파일 하나로"));
             if (files.All(Kinds.IsZip)) list.Add(new MenuChoice("unzip", "압축 풀기", "새 폴더에 풀기"));
             return list;
@@ -1233,8 +1243,7 @@ namespace Tuk
                     // PDF 손질은 웹 버전에서 한다. 파일이 있는 폴더도 같이 열어 끌어다 놓기 쉽게.
                     item.Click += delegate
                     {
-                        try { Process.Start(new ProcessStartInfo(Updater.Site + "#web") { UseShellExecute = true }); } catch { }
-                        try { Process.Start("explorer.exe", "/select,\"" + files.First(Kinds.IsPdfFile) + "\""); } catch { }
+                        WebHandoff.Open(files);
                     };
                 }
                 else item.Click += delegate { chosen(choice.Id); };
@@ -1412,6 +1421,184 @@ namespace Tuk
     }
 
     /// 보내기 메뉴로 왔을 때: 보이지 않는 창이 커서 옆에 메뉴를 띄운다
+    // ───────────── 웹 버전에 파일 넘기기 ─────────────
+    // PDF 손질은 웹 버전이 한다. 고른 파일을 이 PC 안(127.0.0.1)에서만 잠깐 내어 주고, 툭 웹 창이 받아 가면 끝낸다.
+    // 주소에 한 번 쓰고 버리는 긴 암호가 들어 있고, 툭 사이트에서 온 요청에만 답한다. 인터넷으로는 아무것도 나가지 않는다.
+    static class WebHandoff
+    {
+        static string SiteUrl()
+        {
+            var t = Environment.GetEnvironmentVariable("TUK_DEBUG") == "1" ? Environment.GetEnvironmentVariable("TUK_SITE") : null;
+            return string.IsNullOrEmpty(t) ? Updater.Site : t;
+        }
+
+        /// 보내기 메뉴에서: 웹 창을 열고 파일을 넘긴다. 받아 가지 않으면 예전처럼 폴더를 열어 준다.
+        public static void Open(IList<string> files)
+        {
+            var list = files.Where(File.Exists).ToList();
+            string url;
+            try { url = Start(list, delegate { Reveal(list); }); }
+            catch { url = SiteUrl() + "#web"; Reveal(list); }
+            try
+            {
+                var edge = Edge();
+                if (edge != null) Process.Start(new ProcessStartInfo(edge, "--app=\"" + url + "\"") { UseShellExecute = false });
+                else Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch
+            {
+                try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+            }
+        }
+
+        static void Reveal(IList<string> list)
+        {
+            try { if (list.Count > 0) Process.Start("explorer.exe", "/select,\"" + list[0] + "\""); } catch { }
+        }
+
+        static string Edge()
+        {
+            foreach (var b in new[] { Environment.GetEnvironmentVariable("ProgramFiles(x86)"), Environment.GetEnvironmentVariable("ProgramFiles"),
+                                      Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) })
+            {
+                if (string.IsNullOrEmpty(b)) continue;
+                var p = Path.Combine(b, @"Microsoft\Edge\Application\msedge.exe");
+                if (File.Exists(p)) return p;
+            }
+            return null;
+        }
+
+        /// 파일을 내어 줄 준비를 하고, 웹 버전이 열 주소를 돌려준다. (프로그램은 받아 갈 때까지 살아 있다)
+        public static string Start(List<string> files, Action notTaken)
+        {
+            string site = SiteUrl();
+            string origin = new Uri(site).GetLeftPart(UriPartial.Authority);
+            var l = new TcpListener(IPAddress.Loopback, 0);
+            l.Start();
+            int port = ((IPEndPoint)l.LocalEndpoint).Port;
+            string token = Guid.NewGuid().ToString("N");
+            var t = new Thread(delegate () { Serve(l, port, token, files, origin, notTaken); });
+            t.IsBackground = false;
+            t.Start();
+            return site + "?app=1&from=" + Uri.EscapeDataString("http://127.0.0.1:" + port + "/" + token + "/");
+        }
+
+        static void Serve(TcpListener l, int port, string token, List<string> files, string origin, Action notTaken)
+        {
+            var start = DateTime.UtcNow; var last = start;
+            bool listed = false; var served = new HashSet<int>();
+            try
+            {
+                while (true)
+                {
+                    if (!l.Pending())
+                    {
+                        var now = DateTime.UtcNow;
+                        if (!listed && (now - start).TotalSeconds > 40) { if (notTaken != null) notTaken(); break; }   // 웹 창이 받아 가지 않았다
+                        if (listed && served.Count >= files.Count && (now - last).TotalSeconds > 2) break;             // 다 넘겼다
+                        if (listed && (now - last).TotalSeconds > 120) break;
+                        Thread.Sleep(25);
+                        continue;
+                    }
+                    using (var c = l.AcceptTcpClient())
+                    {
+                        try
+                        {
+                            c.ReceiveTimeout = 5000; c.SendTimeout = 60000;
+                            int what = Handle(c.GetStream(), port, token, files, origin);
+                            if (what == -1) listed = true; else if (what >= 0) served.Add(what);
+                            if (what != -2) last = DateTime.UtcNow;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+            finally { try { l.Stop(); } catch { } }
+        }
+
+        /// 돌려주는 값: -1 목록을 줬다 · 0 이상 그 번호의 파일을 줬다 · -2 그 밖
+        static int Handle(NetworkStream ns, int port, string token, List<string> files, string origin)
+        {
+            // 요청 머리말 읽기 (16KB까지)
+            var buf = new byte[16384]; int n = 0;
+            while (n < buf.Length)
+            {
+                int r = ns.Read(buf, n, buf.Length - n);
+                if (r <= 0) break;
+                n += r;
+                if (n >= 4 && Encoding.ASCII.GetString(buf, 0, n).Contains("\r\n\r\n")) break;
+            }
+            var lines = Encoding.ASCII.GetString(buf, 0, n).Split(new[] { "\r\n" }, StringSplitOptions.None);
+            var first = lines[0].Split(' ');
+            if (first.Length < 2) return -2;
+            string method = first[0], path = first[1], host = null, from = null;
+            foreach (var h in lines.Skip(1))
+            {
+                int i = h.IndexOf(':'); if (i <= 0) continue;
+                var k = h.Substring(0, i).Trim().ToLowerInvariant(); var v = h.Substring(i + 1).Trim();
+                if (k == "host") host = v; else if (k == "origin") from = v;
+            }
+            string cors = "Access-Control-Allow-Origin: " + origin + "\r\nVary: Origin\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\n" +
+                          "Access-Control-Allow-Headers: *\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 600\r\n" +
+                          "Cache-Control: no-store\r\nConnection: close\r\n";
+            // 이 PC의 이 주소로 온 요청, 툭 사이트에서 온 요청, 암호가 맞는 요청에만 답한다
+            bool ok = host == "127.0.0.1:" + port && (from == null || from == origin) && path.StartsWith("/" + token + "/", StringComparison.Ordinal);
+            if (!ok) { Send(ns, "403 Forbidden", cors, null); return -2; }
+            if (method == "OPTIONS") { Send(ns, "204 No Content", cors, null); return -2; }
+            if (method != "GET") { Send(ns, "405 Method Not Allowed", cors, null); return -2; }
+            string rest = path.Substring(token.Length + 2);
+            if (rest == "list")
+            {
+                var sb = new StringBuilder("[");
+                for (int i = 0; i < files.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append("{\"i\":").Append(i).Append(",\"name\":\"").Append(Json(Path.GetFileName(files[i]))).Append("\",\"size\":")
+                      .Append(new FileInfo(files[i]).Length).Append(",\"time\":")
+                      .Append((long)(File.GetLastWriteTimeUtc(files[i]) - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds).Append('}');
+                }
+                sb.Append(']');
+                Send(ns, "200 OK", cors + "Content-Type: application/json; charset=utf-8\r\n", Encoding.UTF8.GetBytes(sb.ToString()));
+                return -1;
+            }
+            int idx;
+            if (rest.StartsWith("f/", StringComparison.Ordinal) && int.TryParse(rest.Substring(2), NumberStyles.None, CultureInfo.InvariantCulture, out idx) && idx >= 0 && idx < files.Count)
+            {
+                using (var fs = new FileStream(files[idx], FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    var head = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n" + cors + "Content-Type: application/octet-stream\r\nContent-Length: " + fs.Length + "\r\n\r\n");
+                    ns.Write(head, 0, head.Length);
+                    fs.CopyTo(ns, 81920);
+                    ns.Flush();
+                }
+                return idx;
+            }
+            Send(ns, "404 Not Found", cors, null);
+            return -2;
+        }
+
+        static void Send(NetworkStream ns, string status, string headers, byte[] body)
+        {
+            var head = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + "\r\n" + headers + "Content-Length: " + (body == null ? 0 : body.Length) + "\r\n\r\n");
+            ns.Write(head, 0, head.Length);
+            if (body != null) ns.Write(body, 0, body.Length);
+            ns.Flush();
+        }
+
+        static string Json(string t)
+        {
+            var sb = new StringBuilder();
+            foreach (char ch in t)
+            {
+                if (ch == '"' || ch == '\\') sb.Append('\\').Append(ch);
+                else if (ch < 0x20) sb.Append("\\u").Append(((int)ch).ToString("x4"));
+                else sb.Append(ch);
+            }
+            return sb.ToString();
+        }
+    }
+
     sealed class MenuHost : Form
     {
         readonly IList<string> files;
