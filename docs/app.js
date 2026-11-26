@@ -74,6 +74,39 @@
       setItems([...dt.files].map((f) => ({ file: f, path: f.name })));
     }
   });
+  // ── 붙여넣기 (Ctrl+V): 화면 캡처한 그림이나 탐색기에서 복사한 파일 ──
+  // 그림은 지금 목록의 그림 뒤에 더하고 (여러 번 붙여 넣어 묶기), 그 밖의 파일은 새로 올린다.
+  let pasted = 0;
+  const finePointer = !(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  if (finePointer) drop.querySelector('span').textContent += ' · Ctrl+V로 붙여넣기';
+  document.addEventListener('paste', (e) => {
+    const t = e.target;
+    if (t && (t.closest('input, textarea, select, [contenteditable="true"]'))) return;
+    const files = e.clipboardData ? [...e.clipboardData.files] : [];
+    if (!files.length || busy) return;
+    e.preventDefault();
+    const now = new Date();
+    const hhmmss = [now.getHours(), now.getMinutes(), now.getSeconds()].map((n) => String(n).padStart(2, '0')).join('');
+    const named = files.map((f) => {
+      // 캡처한 그림은 이름이 늘 image.png라서 겹치지 않게 이름을 붙인다
+      if (!f.name || /^image\.(png|jpe?g|gif|bmp|webp)$/i.test(f.name)) {
+        pasted++;
+        const nm = '붙여넣은그림_' + hhmmss + '_' + String(pasted).padStart(2, '0') + '.' + ((f.type.split('/')[1] || 'png').replace('jpeg', 'jpg'));
+        return { file: new File([f], nm, { type: f.type || 'image/png', lastModified: now.getTime() }), path: nm };
+      }
+      return { file: f, path: f.name };
+    });
+    if (named.every(isImg)) {
+      const kept = items.filter(isImg);
+      setItems(kept.concat(named));
+      setStatus('붙여 넣었어요. 그림 ' + (kept.length + named.length) + '장이에요. 더 붙여 넣거나 아래에서 고르세요.');
+    } else {
+      setItems(named);
+    }
+    const web = document.getElementById('web');
+    if (web && web.getBoundingClientRect().top > window.innerHeight) web.scrollIntoView();
+  });
+
   // 창 아무 데나 놓아도 브라우저가 파일을 열지 않게
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('drop', (e) => e.preventDefault());

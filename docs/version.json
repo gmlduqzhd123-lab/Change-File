@@ -1,9 +1,9 @@
 {
-    "version":  "0.7.0",
+    "version":  "1.0.0",
     "url":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.exe",
-    "sha256":  "2b114aa1312a0a88afdb21f71c4af712af4c20099b5752f45aa25ff431ae8654",
-    "notes":  "PDF 하나로 묶기가 이름 순서(1, 2, 10…)대로 묶어요. 그림 돌리기(90° 오른쪽·왼쪽)가 생겼어요. 웹에서는 사진 순서를 정해서 묶을 수 있어요.",
+    "sha256":  "9005f369c03ef5b21fba4b05d45e071ce1845f205609514a4c51048b7f6b64b9",
+    "notes":  "툭 1.0 정식판이에요. 그동안의 기능(PDF 만들기·합치기·쪽 고르기, PDF → JPG, 그림 줄이기·돌리기, ZIP)을 다듬었어요. 웹 버전은 앱으로 설치하고 화면 캡처를 Ctrl+V로 붙여 넣을 수 있어요.",
     "zip":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.zip",
-    "zipBytes":  31835,
+    "zipBytes":  31828,
     "date":  "2026-11-26"
 }
