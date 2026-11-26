@@ -1,9 +1,9 @@
 {
-    "version":  "0.4.0",
+    "version":  "0.5.0",
     "url":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.exe",
-    "sha256":  "207682942b0b3f1698a80677e7542d184d2d858342c41685ccec9123bb155606",
-    "notes":  "아이폰 사진(HEIC)을 JPG로 바꾸고, PDF로 만들고, 용량을 줄일 수 있어요. 웹 버전에서 PDF를 쪽마다 나누거나 JPG 그림으로 바꿀 수 있어요.",
+    "sha256":  "5aa3faa1a552bb1ff16359806d32baaf414628033a79abd0bd63274807a46f7d",
+    "notes":  "여러 파일을 바꿀 때 몇 번째인지 보여 주고 [취소]로 멈출 수 있어요. 웹 버전에서 PDF에 쪽 번호와 워터마크(한글 가능)를 넣을 수 있어요.",
     "zip":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.zip",
-    "zipBytes":  27952,
+    "zipBytes":  28682,
     "date":  "2026-11-26"
 }

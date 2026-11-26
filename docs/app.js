@@ -72,7 +72,11 @@
   }
 
   let editor = null;
-  function closeEditor() { if (editor) { const e = editor; editor = null; e.close(); } }
+  function closeEditor() {
+    if (editor) { const e = editor; editor = null; e.close(); }
+    const o = document.querySelector('#opts');
+    if (o) { o.hidden = true; o.innerHTML = ''; }
+  }
 
   function setItems(list) {
     if (busy) return;
@@ -106,6 +110,8 @@
     const choices = [];
     if (pdfs > 1) choices.push(['merge', 'PDF 합치기 (' + pdfs + '개)']);
     if (pdfs > 0) choices.push(['pages', pdfs > 1 ? '쪽 고르기·돌리기 (합쳐서)' : '쪽 빼기·돌리기·순서']);
+    if (pdfs > 0) choices.push(['pagenum', '쪽 번호 넣기']);
+    if (pdfs > 0) choices.push(['wm', '워터마크 넣기']);
     if (pdfs > 0) choices.push(['split', '쪽마다 나누기']);
     if (pdfs > 0) choices.push(['pdfjpg', 'PDF → JPG 그림']);
     if (imgs > 0) choices.push(['pdf', imgs > 1 ? '그림마다 PDF로' : 'PDF로']);
@@ -186,6 +192,7 @@
   // ── PDF 쪽 고르기 ──
   async function openEditor() {
     if (busy || editor) return;
+    closeOptions();
     busy = true;
     clearResults();
     actionsEl.querySelectorAll('button').forEach((b) => (b.disabled = true));
@@ -237,7 +244,77 @@
   }
 
   // ── 일하기 ──
+  // ── 쪽 번호·워터마크 고르기 ──
+  const optsEl = $('#opts');
+  const FORMS = {
+    pagenum: {
+      title: '쪽 번호 넣기',
+      html:
+        '<label>위치 <select name="where"><option value="bc">아래 가운데</option><option value="br">아래 오른쪽</option><option value="tr">위 오른쪽</option></select></label>' +
+        '<label>모양 <select name="style"><option value="n">1</option><option value="nt">1 / 10</option><option value="dash">- 1 -</option></select></label>' +
+        '<label>시작 번호 <input name="start" type="number" min="0" max="9999" value="1" inputmode="numeric"></label>' +
+        '<label class="check"><input name="skipFirst" type="checkbox"> 첫 쪽(표지)은 빼고 세기</label>',
+      read: (f) => ({ where: f.where.value, style: f.style.value, start: Math.max(0, Math.min(9999, parseInt(f.start.value, 10) || 1)), skipFirst: f.skipFirst.checked }),
+      run: (files, o) => window.TukPdf.pageNumbers(files, o, setStatus),
+    },
+    wm: {
+      title: '워터마크 넣기',
+      html:
+        '<label class="wide">글씨 <input name="text" type="text" maxlength="40" value="외부 유출 금지" required></label>' +
+        '<label>진하기 <select name="alpha"><option value="0.12">연하게</option><option value="0.2" selected>보통</option><option value="0.32">진하게</option></select></label>' +
+        '<label>방향 <select name="diagonal"><option value="1">대각선</option><option value="0">가로</option></select></label>',
+      read: (f) => ({ text: f.text.value.trim(), alpha: Number(f.alpha.value), diagonal: f.diagonal.value === '1' }),
+      run: (files, o) => window.TukPdf.watermark(files, o, setStatus),
+    },
+  };
+  // 고른 값은 이 브라우저에만 기억한다
+  const remember = (k, v) => { try { localStorage.setItem('tuk.' + k, JSON.stringify(v)); } catch (_) { /* 무시 */ } };
+  const recall = (k) => { try { return JSON.parse(localStorage.getItem('tuk.' + k) || 'null'); } catch (_) { return null; } };
+
+  function showOptions(id) {
+    const def = FORMS[id];
+    optsEl.hidden = false;
+    optsEl.innerHTML = '<form class="opts-form"><b class="opts-title"></b><div class="opts-fields">' + def.html + '</div>' +
+      '<div class="bar"><button class="btn primary" type="submit">PDF ' + items.filter(isPdf).length + '개에 넣기</button>' +
+      '<button class="btn small" type="button" data-act="close">닫기</button></div></form>';
+    const form = optsEl.querySelector('form');
+    optsEl.querySelector('.opts-title').textContent = def.title;
+    const saved = recall(id);
+    if (saved) for (const [k, v] of Object.entries(saved)) {
+      const el = form.elements[k];
+      if (!el || (k === 'text' && !v)) continue;
+      if (el.type === 'checkbox') el.checked = !!v;
+      else el.value = typeof v === 'boolean' ? (v ? '1' : '0') : String(v);
+    }
+    form.querySelector('[data-act="close"]').addEventListener('click', closeOptions);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (busy) return;
+      const o = def.read(form.elements);
+      if (id === 'wm' && !o.text) { setStatus('워터마크 글씨를 적어 주세요', true); return; }
+      remember(id, o);
+      busy = true;
+      form.querySelectorAll('button').forEach((b) => (b.disabled = true));
+      clearResults();
+      const problems = [];
+      for (const it of items.filter(isPdf)) {
+        try { for (const r of await def.run([it.file], o)) addResult(r.name, r.blob); }
+        catch (err) { problems.push(why(err)); }
+      }
+      busy = false;
+      form.querySelectorAll('button').forEach((b) => (b.disabled = false));
+      const head = results.length ? (problems.length ? '일부만 됐어요. ' : '다 됐어요. ') + results.length + '개를 만들었어요.' : '만든 파일이 없어요.';
+      setStatus([head].concat(problems).join(' · '), problems.length > 0 && results.length === 0);
+      resultBar.hidden = results.length === 0;
+      $('#zipAll').hidden = results.length < 2;
+    });
+    optsEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    form.querySelector('input, select').focus();
+  }
+  function closeOptions() { optsEl.hidden = true; optsEl.innerHTML = ''; }
+
   async function run(id) {
+    if (FORMS[id]) return showOptions(id);
     if (id === 'pages') return openEditor();
     if (busy) return;
     busy = true;

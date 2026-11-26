@@ -21,7 +21,7 @@ namespace Tuk
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "0.4.0";
+        public const string Version = "0.5.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -286,18 +286,42 @@ namespace Tuk
         public readonly List<string> Made = new List<string>();
         public readonly List<string> Problems = new List<string>();
         public readonly List<string> Notes = new List<string>();
+        public bool Cancelled;
     }
 
     static class Jobs
     {
         public static JobResult Run(string id, IList<string> files)
         {
+            return Run(id, files, null, null);
+        }
+
+        /// progress(지금 몇 번째, 모두 몇 개, 파일 이름) · stop()이 true면 다음 파일부터 멈춘다
+        public static JobResult Run(string id, IList<string> files, Action<int, int, string> progress, Func<bool> stop)
+        {
             var r = new JobResult();
+            // 파일마다 하는 일: 진행 상황을 알리고, 취소하면 남은 파일은 건너뛴다
+            Action<IEnumerable<string>, Action<string>> each = delegate (IEnumerable<string> list, Action<string> work)
+            {
+                var all = list.ToList();
+                for (int i = 0; i < all.Count; i++)
+                {
+                    if (stop != null && stop())
+                    {
+                        r.Notes.Insert(0, "취소했어요. " + (all.Count - i) + "개는 하지 않았어요.");
+                        r.Cancelled = true;
+                        return;
+                    }
+                    if (progress != null) progress(i + 1, all.Count, Path.GetFileName(all[i]));
+                    var f = all[i];
+                    Safe(r, f, delegate { work(f); });
+                }
+            };
             try
             {
                 switch (id)
                 {
-                    case "pdf": foreach (var f in files) Safe(r, f, delegate { ToPdf(r, f); }); break;
+                    case "pdf": each(files, delegate (string f) { ToPdf(r, f); }); break;
                     case "pdfall": Safe(r, files[0], delegate { ImagesToOnePdf(r, files.Where(Kinds.IsImage).ToList()); }); break;
                     case "shrink":
                     case "shrink-s":
@@ -305,24 +329,22 @@ namespace Tuk
                         {
                             int side = ShrinkSide(id);
                             long before = 0, after = 0; int done = 0;
-                            foreach (var f in files.Where(Kinds.IsImage))
-                                Safe(r, f, delegate { long b, a; if (Shrink(r, f, side, out b, out a)) { before += b; after += a; done++; } });
-                            if (done > 1) r.Notes.Insert(0, done + "장 합계 " + Paths.Size(before) + " → " + Paths.Size(after));
+                            each(files.Where(Kinds.IsImage), delegate (string f) { long b, a; if (Shrink(r, f, side, out b, out a)) { before += b; after += a; done++; } });
+                            if (done > 1) r.Notes.Insert(r.Cancelled ? 1 : 0, done + "장 합계 " + Paths.Size(before) + " → " + Paths.Size(after));
                             break;
                         }
                     case "tojpg":
-                        foreach (var f in files.Where(x => Kinds.IsImage(x) && Kinds.IsHeic(x)))
-                            Safe(r, f, delegate
-                            {
-                                byte[] jpg;
-                                using (var img = Pictures.LoadUpright(f)) jpg = Pictures.Jpeg(img, 0, 90);
-                                string outPath = Paths.Beside(f, "", ".jpg");
-                                File.WriteAllBytes(outPath, jpg);
-                                r.Made.Add(outPath);
-                            });
+                        each(files.Where(x => Kinds.IsImage(x) && Kinds.IsHeic(x)), delegate (string f)
+                        {
+                            byte[] jpg;
+                            using (var img = Pictures.LoadUpright(f)) jpg = Pictures.Jpeg(img, 0, 90);
+                            string outPath = Paths.Beside(f, "", ".jpg");
+                            File.WriteAllBytes(outPath, jpg);
+                            r.Made.Add(outPath);
+                        });
                         break;
                     case "zip": Safe(r, files[0], delegate { r.Made.Add(Zipper.Pack(files)); }); break;
-                    case "unzip": foreach (var f in files) Safe(r, f, delegate { r.Made.Add(Zipper.Unpack(f)); }); break;
+                    case "unzip": each(files, delegate (string f) { r.Made.Add(Zipper.Unpack(f)); }); break;
                     default: r.Problems.Add("모르는 동작: " + id); break;
                 }
             }
@@ -960,12 +982,16 @@ namespace Tuk
         public static void RunWithToast(string id, IList<string> files, Action done)
         {
             var label = LabelOf(id, files);
-            var busy = Toast.Busy(label + " 하는 중…", files.Count > 1 ? "파일 " + files.Count + "개 · 잠시만 기다려 주세요." : "잠시만 기다려 주세요.");
+            int stop = 0;
+            var busy = Toast.Busy(label + " 하는 중…", files.Count > 1 ? "파일 " + files.Count + "개 · 잠시만 기다려 주세요." : "잠시만 기다려 주세요.",
+                files.Count > 1 ? (Action)delegate { Interlocked.Exchange(ref stop, 1); } : null);
             busy.Show();
             var ui = SynchronizationContext.Current;
             var t = new Thread(delegate ()
             {
-                var r = Jobs.Run(id, files);
+                var r = Jobs.Run(id, files,
+                    delegate (int i, int n, string name) { ui.Post(delegate { busy.SetBody(i + " / " + n + " · " + name); }, null); },
+                    delegate { return Volatile.Read(ref stop) == 1; });
                 ui.Post(delegate
                 {
                     busy.Close();
@@ -985,10 +1011,17 @@ namespace Tuk
     {
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
 
-        public static Toast Busy(string title, string body)
+        Label bodyLabel;
+        Action cancel;
+
+        /// 일하는 동안 보이는 알림. cancel을 주면 [취소]가 생긴다.
+        public static Toast Busy(string title, string body, Action cancel)
         {
-            return new Toast(title, body, null, null, false, true);
+            var t = new Toast(title, body, null, null, false, true, cancel);
+            return t;
         }
+
+        public void SetBody(string text) { if (!IsDisposed && bodyLabel != null) bodyLabel.Text = text; }
 
         public static Toast For(string label, JobResult r)
         {
@@ -998,6 +1031,7 @@ namespace Tuk
             else if (r.Made.Count > 0) title = "일부만 됐어요 · " + label;
             else if (!bad) title = "바꿀 것이 없었어요 · " + label;
             else title = "하지 못했어요 · " + label;
+            if (r.Cancelled) title = "멈췄어요 · " + label;
 
             var lines = new List<string>();
             if (r.Made.Count == 1) lines.Add(Path.GetFileName(r.Made[0]));
@@ -1012,8 +1046,9 @@ namespace Tuk
             return new Toast(title, string.Join("\n", lines), open, reveal, bad && r.Made.Count == 0, false);
         }
 
-        Toast(string title, string body, string open, string reveal, bool bad, bool busy)
+        Toast(string title, string body, string open, string reveal, bool bad, bool busy, Action cancel = null)
         {
+            this.cancel = cancel;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -1028,7 +1063,19 @@ namespace Tuk
             var t = new Label { Text = title, Font = Ui.Title, ForeColor = Ui.Ink, AutoSize = false, AutoEllipsis = true, Location = new Point(left, Ui.Px(12)), Size = new Size(inner, Ui.Px(28)) };
             var b = new Label { Text = body, Font = Ui.Small, ForeColor = Ui.Ink, AutoSize = false, AutoEllipsis = true, Location = new Point(left, Ui.Px(42)), Size = new Size(inner, bodyH) };
             Controls.Add(bar); Controls.Add(t); Controls.Add(b);
+            bodyLabel = b;
             int y = Ui.Px(42) + bodyH + Ui.Px(6);
+            if (cancel != null)
+            {
+                var c = Link("취소", false, left, y);
+                c.LinkClicked += delegate
+                {
+                    c.Enabled = false;
+                    c.Text = "지금 파일까지 하고 멈춰요…";
+                    this.cancel();
+                };
+                y += Ui.Px(24);
+            }
 
             int x = left;
             if (open != null)

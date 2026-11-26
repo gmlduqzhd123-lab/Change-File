@@ -139,6 +139,106 @@
     return out;
   }
 
+  // ── 쪽 위에 그리기 (쪽 번호·워터마크) ──
+  // 돌려 둔 쪽(/Rotate)도 '보이는 방향' 기준으로 그린다.
+  // 보이는 좌표(vx, vy: 왼쪽 아래가 0)를 PDF 좌표로 바꾼다.
+  function frame(page) {
+    const box = page.getCropBox();
+    const r = ((page.getRotation().angle % 360) + 360) % 360;
+    const W = box.width, H = box.height;
+    const vw = r % 180 ? H : W, vh = r % 180 ? W : H;
+    const map = (vx, vy) => {
+      let x, y;
+      if (r === 90) { x = W - vy; y = vx; }
+      else if (r === 180) { x = W - vx; y = H - vy; }
+      else if (r === 270) { x = vy; y = H - vx; }
+      else { x = vx; y = vy; }
+      return { x: x + box.x, y: y + box.y };
+    };
+    return { r, vw, vh, map };
+  }
+
+  async function eachPdf(files, suffix, status, paint) {
+    await needPdfLib();
+    const out = [];
+    for (const f of [...files].sort(byName)) {
+      status(f.name + ' 고치는 중…');
+      const { doc } = await openPdf(f);
+      await paint(doc, f);
+      out.push({ name: stem(f.name) + suffix + '.pdf', blob: new Blob([await doc.save()], { type: 'application/pdf' }) });
+    }
+    return out;
+  }
+
+  /**
+   * 쪽 번호 넣기
+   * @param {{where: 'bc'|'br'|'tr', style: 'n'|'nt'|'dash', start: number, skipFirst: boolean}} o
+   */
+  function pageNumbers(files, o, status) {
+    return eachPdf(files, '_쪽번호', status, async (doc) => {
+      const { StandardFonts, degrees, rgb } = window.PDFLib;
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const pages = doc.getPages();
+      const counted = o.skipFirst ? pages.length - 1 : pages.length;
+      pages.forEach((page, i) => {
+        if (o.skipFirst && i === 0) return;
+        const n = (o.skipFirst ? i : i + 1) + (o.start - 1);
+        const last = counted + (o.start - 1);
+        const text = o.style === 'nt' ? n + ' / ' + last : o.style === 'dash' ? '- ' + n + ' -' : String(n);
+        const f = frame(page);
+        const size = Math.max(8, Math.min(14, Math.min(f.vw, f.vh) / 56));
+        const tw = font.widthOfTextAtSize(text, size);
+        const m = Math.min(f.vw, f.vh) * 0.045;
+        const vx = o.where === 'bc' ? (f.vw - tw) / 2 : f.vw - m - tw;
+        const vy = o.where === 'tr' ? f.vh - m - size * 0.75 : m;
+        const at = f.map(vx, vy);
+        page.drawText(text, { x: at.x, y: at.y, size, font, color: rgb(0.2, 0.2, 0.2), rotate: degrees(f.r) });
+      });
+    });
+  }
+
+  /** 글씨를 그림으로 만든다 (한글 글꼴을 PDF에 넣지 않아도 되게) */
+  async function textImage(doc, text, alpha) {
+    const px = 160;
+    const c = document.createElement('canvas');
+    const g = c.getContext('2d');
+    const font = 'bold ' + px + 'px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+    g.font = font;
+    const w = Math.ceil(g.measureText(text).width) + px / 2;
+    c.width = w; c.height = Math.ceil(px * 1.4);
+    g.font = font;
+    g.textBaseline = 'middle';
+    g.textAlign = 'center';
+    g.fillStyle = 'rgba(120, 120, 120, ' + alpha + ')';
+    g.fillText(text, w / 2, c.height / 2);
+    const png = await new Promise((res) => c.toBlob(res, 'image/png'));
+    return { img: await doc.embedPng(new Uint8Array(await png.arrayBuffer())), ratio: c.height / c.width };
+  }
+
+  /**
+   * 글씨 워터마크
+   * @param {{text: string, alpha: number, diagonal: boolean}} o
+   */
+  function watermark(files, o, status) {
+    return eachPdf(files, '_워터마크', status, async (doc) => {
+      const { degrees } = window.PDFLib;
+      const { img, ratio } = await textImage(doc, o.text, o.alpha);
+      for (const page of doc.getPages()) {
+        const f = frame(page);
+        const t = o.diagonal ? Math.atan2(f.vh, f.vw) : 0;
+        const span = o.diagonal ? Math.hypot(f.vw, f.vh) * 0.7 : f.vw * 0.8;
+        let w = span, h = span * ratio;
+        if (h > f.vh * 0.3 && !o.diagonal) { h = f.vh * 0.3; w = h / ratio; }
+        // 가운데에 오도록, 돌린 그림의 왼쪽 아래 꼭짓점을 구한다
+        const cx = f.vw / 2, cy = f.vh / 2;
+        const vx = cx - (Math.cos(t) * w - Math.sin(t) * h) / 2;
+        const vy = cy - (Math.sin(t) * w + Math.cos(t) * h) / 2;
+        const at = f.map(vx, vy);
+        page.drawImage(img, { x: at.x, y: at.y, width: w, height: h, rotate: degrees(f.r + t * 180 / Math.PI) });
+      }
+    });
+  }
+
   // ── 쪽 고르기 화면 ──
   /**
    * @param {File[]} files
@@ -295,5 +395,5 @@
     return { close };
   }
 
-  window.TukPdf = { merge, edit, split, toJpg };
+  window.TukPdf = { merge, edit, split, toJpg, pageNumbers, watermark };
 })();
