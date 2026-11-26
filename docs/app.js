@@ -14,6 +14,11 @@
   let results = [];
   let busy = false;
 
+  // 그림 줄이기 크기 (긴 쪽 픽셀). 고른 값은 이 브라우저에만 기억한다.
+  const SIZES = [[1024, '작게 · 1024픽셀'], [1600, '보통 · 1600픽셀'], [2560, '크게 · 2560픽셀']];
+  let shrinkSide = 1600;
+  try { const v = Number(localStorage.getItem('tuk.shrinkSide')); if (SIZES.some(([s]) => s === v)) shrinkSide = v; } catch (_) { /* 저장 못 해도 괜찮다 */ }
+
   const ext = (n) => (n.split('.').pop() || '').toLowerCase();
   const stem = (n) => { const b = n.split('/').pop(); const i = b.lastIndexOf('.'); return i > 0 ? b.slice(0, i) : b; };
   const isImg = (it) => IMG.includes(ext(it.file.name));
@@ -101,13 +106,32 @@
       b.className = 'btn' + (i === 0 ? ' primary' : '');
       b.textContent = label;
       b.addEventListener('click', () => run(id));
-      actionsEl.appendChild(b);
+      if (id === 'shrink') {
+        // 단추와 크기 고르기를 한 덩어리로
+        const g = document.createElement('span');
+        g.className = 'pair';
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', '줄일 크기');
+        for (const [s, label] of SIZES) {
+          const o = document.createElement('option');
+          o.value = String(s); o.textContent = label; o.selected = s === shrinkSide;
+          sel.appendChild(o);
+        }
+        sel.addEventListener('change', () => {
+          shrinkSide = Number(sel.value);
+          try { localStorage.setItem('tuk.shrinkSide', sel.value); } catch (_) { /* 무시 */ }
+        });
+        g.append(b, sel);
+        actionsEl.appendChild(g);
+      } else actionsEl.appendChild(b);
     });
 
     const office = items.filter(isOffice).length;
     if (office > 0) {
       hintEl.hidden = false;
-      hintEl.innerHTML = '한글·워드·엑셀·PPT 문서 ' + office + '개는 웹에서 PDF로 바꿀 수 없어요. <a href="#windows">윈도우 프로그램</a>에서는 돼요.';
+      hintEl.className = 'hint office';
+      hintEl.innerHTML = '<span><b>한글·워드·엑셀·PPT 문서 ' + office + '개</b>는 웹에서 PDF로 바꿀 수 없어요. 윈도우 프로그램은 탐색기에서 바로 바꿔요.</span>' +
+        '<a class="btn small primary" href="download/Tuk.zip" download>윈도우 프로그램 받기</a>';
     } else hintEl.hidden = true;
   }
 
@@ -182,15 +206,18 @@
         setStatus('PDF 하나로 묶는 중…');
         addResult(stem(imgs[0].file.name) + '_묶음.pdf', await imagesToPdf(imgs.map((x) => x.file), (i) => setStatus('PDF 하나로 묶는 중… ' + (i + 1) + '/' + imgs.length)));
       } else if (id === 'shrink') {
+        let before = 0, after = 0, done = 0;
         for (let i = 0; i < imgs.length; i++) {
           const f = imgs[i].file;
           setStatus('용량 줄이는 중… ' + (i + 1) + '/' + imgs.length);
           try {
-            const j = await toJpeg(f, 1600, 0.8);
+            const j = await toJpeg(f, shrinkSide, 0.8);
             if (j.bytes.length >= f.size) { notes.push(f.name + '은(는) 이미 충분히 작아요'); continue; }
             addResult(stem(f.name) + '_줄임.jpg', new Blob([j.bytes], { type: 'image/jpeg' }), size(f.size) + ' → ' + size(j.bytes.length));
+            before += f.size; after += j.bytes.length; done++;
           } catch (e) { problems.push(f.name + ': ' + why(e)); }
         }
+        if (done > 1) notes.unshift(done + '장 합계 ' + size(before) + ' → ' + size(after));
       } else if (id === 'zip') {
         setStatus('ZIP으로 묶는 중…');
         const zip = new JSZip();
@@ -227,7 +254,9 @@
   }
 
   function why(e) {
-    if (e && e.name === 'EncodingError') return '그림을 읽지 못했어요';
+    if (e && e.name === 'EncodingError') return '그림 파일이 손상됐거나 읽을 수 없는 형식이에요';
+    if (e && e.name === 'NotReadableError') return '파일을 읽지 못했어요. 다른 프로그램이 쓰고 있지 않은지 확인해 주세요';
+    if (e && /corrupted zip|end of central directory/i.test(e.message || '')) return '압축 파일이 손상됐거나 ZIP 형식이 아니에요';
     return (e && e.message) || String(e);
   }
 

@@ -72,9 +72,22 @@ section .lead { color: var(--muted); margin: 0 0 24px; }
 .files li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files li .sz { flex: none; color: var(--muted); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-.actions .btn { min-height: 44px; }
+.actions .btn { min-height: 44px; white-space: nowrap; }
 .hint { margin-top: 12px; font-size: 14px; color: var(--muted); }
 .hint a { color: var(--accent); }
+.hint.office { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px; border-radius: 12px; background: var(--accent-soft); color: var(--ink); }
+.hint.office span { flex: 1 1 260px; }
+.hint.office a.btn { color: var(--accent-ink); }
+[hidden] { display: none !important; }
+.pair { display: inline-flex; align-items: stretch; }
+.pair .btn { border-radius: 999px 0 0 999px; }
+.pair select { min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-left: 0; border-radius: 0 999px 999px 0; background: var(--sheet2); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
+.smartscreen { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0 4px; font-size: 14px; }
+.smartscreen .win { background: #1f5fa8; color: #fff; border-radius: 8px; padding: 10px 14px; min-width: 170px; line-height: 1.5; }
+.smartscreen .win small { display: block; opacity: .8; }
+.smartscreen .win u { font-weight: 700; }
+.smartscreen .win .run { display: inline-block; margin-top: 6px; padding: 2px 12px; border: 1px solid #fff; border-radius: 4px; font-weight: 700; }
+.smartscreen .arrow { color: var(--muted); font-size: 20px; }
 .status { margin-top: 16px; font-size: 15px; min-height: 1.6em; }
 .status.bad { color: var(--bad); }
 .results { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
@@ -161,7 +174,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
       <p class="lead">놓은 파일에 맞는 단추만 보여요. 결과는 원본과 다른 새 파일이에요.</p>
       <div class="grid">
         <div class="card feature"><h3><span class="dot" style="background:#E86E3C"></span>PDF로</h3><p>그림을 A4 PDF로. 여러 장은 하나로 묶을 수도 있어요. 윈도우 프로그램은 한글·워드·엑셀·PPT도 PDF로 바꿔요.</p></div>
-        <div class="card feature"><h3><span class="dot" style="background:#3C8CE8"></span>그림 용량 줄이기</h3><p>긴 쪽을 1600픽셀로 맞춘 JPG로. 알림장·메일에 올리기 좋아요. 사진 회전도 바로잡아요.</p></div>
+        <div class="card feature"><h3><span class="dot" style="background:#3C8CE8"></span>그림 용량 줄이기</h3><p>작게(1024)·보통(1600)·크게(2560) 중에 골라 JPG로. 알림장·메일에 올리기 좋아요. 사진 회전도 바로잡아요.</p></div>
         <div class="card feature"><h3><span class="dot" style="background:#2F8F5B"></span>ZIP 묶기·풀기</h3><p>여러 파일·폴더를 ZIP 하나로 묶거나, 받은 ZIP을 풀어요. 한글 이름이 깨진 ZIP도 읽어요.</p></div>
       </div>
     </div>
@@ -196,8 +209,14 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
 
       <ol class="steps">
         <li>받은 <b>Tuk.zip</b>을 오른쪽 클릭 → <b>[압축 풀기…]</b>로 먼저 풀어요.</li>
-        <li>풀린 폴더의 <b>Tuk.exe</b>를 두 번 클릭해요. 파란 <b>'Windows의 PC 보호'</b> 창이 뜨면 <b>[추가 정보] → [실행]</b>을 눌러요. 코드 서명을 하지 않은 새 프로그램이라 처음 한 번 뜨는 창이에요.</li>
-        <li>툭 창에서 <b>[보내기 메뉴에 넣기]</b>를 누르면 끝. 이제 파일 오른쪽 클릭 → 보내기 → 툭 (윈도우 11은 '더 많은 옵션 표시' 먼저). 메뉴는 숫자 키 <kbd>1</kbd>~<kbd>5</kbd>로도 골라요.</li>
+        <li>풀린 폴더의 <b>Tuk.exe</b>를 두 번 클릭해요. 파란 <b>'Windows의 PC 보호'</b> 창이 뜨면 두 번만 누르면 돼요.
+          <div class="smartscreen" aria-hidden="true">
+            <div class="win">Windows의 PC 보호<small>알 수 없는 앱의 실행을 막았어요</small><u>① 추가 정보</u></div>
+            <span class="arrow">→</span>
+            <div class="win">앱: Tuk.exe<small>게시자: 알 수 없음</small><span class="run">② 실행</span></div>
+          </div>
+          코드 서명을 하지 않은 새 프로그램이라 처음 한 번만 뜨는 창이에요.</li>
+        <li>툭 창에서 주황색 <b>[보내기 메뉴에 넣기]</b>를 누르면 끝. 이제 파일 오른쪽 클릭 → 보내기 → 툭 (윈도우 11은 '더 많은 옵션 표시' 먼저). 메뉴는 숫자 키 <kbd>1</kbd>~<kbd>5</kbd>로도 골라요.</li>
         <li>새 버전은 툭 창 아래 <b>[새 버전 확인]</b>에서 받아요. 하루 한 번 저절로 확인해요.</li>
       </ol>
     </div>

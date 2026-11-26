@@ -1,9 +1,9 @@
 {
-    "version":  "0.1.0",
+    "version":  "0.2.0",
     "url":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.exe",
-    "sha256":  "772ac1086db89cad12745a4ecfb5514cf85faa6614fef809de0ad0ec37d18ee8",
-    "notes":  "첫 버전이에요.",
+    "sha256":  "3efbc0a02420b0acabecb14dd7ba7f81146fec27c98ef6ab3d0c050f74a11317",
+    "notes":  "알림 창에 [열기] 단추와 줄인 용량 합계를 넣었어요. 그림 줄이기 크기(작게·보통·크게)를 고를 수 있어요. 문제가 생기면 무엇을 하면 되는지 알려 줘요. 화면 배율이 큰 모니터에서도 글자가 또렷해요.",
     "zip":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.zip",
-    "zipBytes":  23124,
+    "zipBytes":  26711,
     "date":  "2026-11-26"
 }

@@ -1,4 +1,4 @@
-// 툭 — 파일을 툭 놓으면 PDF·용량 줄이기·압축을 해 주는 작은 윈도우 프로그램.
+﻿// 툭 — 파일을 툭 놓으면 PDF·용량 줄이기·압축을 해 주는 작은 윈도우 프로그램.
 // .NET Framework 4.x 기본 컴파일러(C# 5)로 빌드한다. build.ps1 참고.
 using System;
 using System.Collections.Generic;
@@ -20,7 +20,7 @@ namespace Tuk
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "0.1.0";
+        public const string Version = "0.2.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -184,6 +184,7 @@ namespace Tuk
         [STAThread]
         static int Main(string[] args)
         {
+            Ui.UseSharpText();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Updater.CleanupOld();
@@ -206,8 +207,18 @@ namespace Tuk
             if (args.Length >= 2 && args[0] == "/run")
             {
                 var job = Jobs.Run(args[1], args.Skip(2).ToList());
+                foreach (var n in job.Notes) Console.Out.WriteLine(n);
                 foreach (var p in job.Problems) Console.Error.WriteLine(p);
                 return job.Problems.Count;
+            }
+
+            // 시험용: 메뉴 없이 바로 실행하고 알림 창까지 보여 준다
+            if (args.Length >= 2 && args[0] == "/run-ui")
+            {
+                var host = new Form { Opacity = 0, ShowInTaskbar = false, FormBorderStyle = FormBorderStyle.None, Size = new Size(1, 1) };
+                host.Shown += delegate { Ui.RunWithToast(args[1], args.Skip(2).ToList(), delegate { host.Close(); }); };
+                Application.Run(host);
+                return 0;
             }
 
             var files = args.Where(a => File.Exists(a) || Directory.Exists(a)).ToList();
@@ -256,7 +267,7 @@ namespace Tuk
             int img = files.Count(Kinds.IsImage);
             if (pdf > 0) list.Add(new MenuChoice("pdf", "PDF로", pdf + "개 파일을 각각 PDF로"));
             if (img > 1) list.Add(new MenuChoice("pdfall", "PDF 하나로 묶기", "그림 " + img + "장을 PDF 한 개로"));
-            if (img > 0) list.Add(new MenuChoice("shrink", "그림 용량 줄이기", "긴 쪽 1600픽셀 · JPG"));
+            if (img > 0) list.Add(new MenuChoice("shrink", "그림 용량 줄이기", "크기를 골라요 · JPG"));
             list.Add(new MenuChoice("zip", "ZIP으로 묶기", "고른 것을 압축 파일 하나로"));
             if (files.All(Kinds.IsZip)) list.Add(new MenuChoice("unzip", "압축 풀기", "새 폴더에 풀기"));
             return list;
@@ -282,14 +293,30 @@ namespace Tuk
                 {
                     case "pdf": foreach (var f in files) Safe(r, f, delegate { ToPdf(r, f); }); break;
                     case "pdfall": Safe(r, files[0], delegate { ImagesToOnePdf(r, files.Where(Kinds.IsImage).ToList()); }); break;
-                    case "shrink": foreach (var f in files.Where(Kinds.IsImage)) Safe(r, f, delegate { Shrink(r, f); }); break;
+                    case "shrink":
+                    case "shrink-s":
+                    case "shrink-l":
+                        {
+                            int side = ShrinkSide(id);
+                            long before = 0, after = 0; int done = 0;
+                            foreach (var f in files.Where(Kinds.IsImage))
+                                Safe(r, f, delegate { long b, a; if (Shrink(r, f, side, out b, out a)) { before += b; after += a; done++; } });
+                            if (done > 1) r.Notes.Insert(0, done + "장 합계 " + Paths.Size(before) + " → " + Paths.Size(after));
+                            break;
+                        }
                     case "zip": Safe(r, files[0], delegate { r.Made.Add(Zipper.Pack(files)); }); break;
                     case "unzip": foreach (var f in files) Safe(r, f, delegate { r.Made.Add(Zipper.Unpack(f)); }); break;
                     default: r.Problems.Add("모르는 동작: " + id); break;
                 }
             }
-            catch (Exception ex) { r.Problems.Add(ex.Message); }
+            catch (Exception ex) { r.Problems.Add(Friendly(ex)); }
             return r;
+        }
+
+        /// 그림 줄이기 크기: 작게 1024 · 보통 1600 · 크게 2560 (긴 쪽 픽셀)
+        public static int ShrinkSide(string id)
+        {
+            return id == "shrink-s" ? 1024 : id == "shrink-l" ? 2560 : 1600;
         }
 
         static void Safe(JobResult r, string f, Action a)
@@ -297,10 +324,34 @@ namespace Tuk
             try { a(); }
             catch (Exception ex)
             {
-                var inner = ex is System.Reflection.TargetInvocationException && ex.InnerException != null ? ex.InnerException : ex;
-                r.Problems.Add(Path.GetFileName(f) + ": " + inner.Message);
+                r.Problems.Add(Path.GetFileName(f) + ": " + Friendly(ex));
                 if (Environment.GetEnvironmentVariable("TUK_DEBUG") == "1") Console.Error.WriteLine(ex.ToString());
             }
+        }
+
+        /// 오류를 무엇을 하면 되는지 알 수 있는 말로 바꾼다
+        public static string Friendly(Exception ex)
+        {
+            var e = ex is System.Reflection.TargetInvocationException && ex.InnerException != null ? ex.InnerException : ex;
+            if (e is UnauthorizedAccessException)
+                return "이 폴더에는 새 파일을 만들 수 없어요. 파일을 바탕화면 같은 곳으로 옮겨서 다시 해 보세요.";
+            if (e is FileNotFoundException || e is DirectoryNotFoundException)
+                return "파일을 찾지 못했어요. 옮겨지거나 지워지지 않았는지 확인해 주세요.";
+            if (e is PathTooLongException)
+                return "폴더 경로가 너무 길어요. 파일을 바탕화면 같은 짧은 경로로 옮겨서 해 보세요.";
+            if (e is InvalidDataException)
+                return "압축 파일이 손상됐거나 ZIP 형식이 아니에요.";
+            if (e is IOException)
+            {
+                int code = e.HResult & 0xFFFF;
+                if (code == 32 || code == 33) return "다른 프로그램이 이 파일을 쓰고 있어요. 그 프로그램을 닫고 다시 해 보세요.";
+                if (code == 112 || code == 39) return "디스크 공간이 모자라요. 공간을 비우고 다시 해 보세요.";
+            }
+            if (e is COMException || e is InvalidComObjectException || e is Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+                return "문서 프로그램(한글·워드 등)이 바꾸는 도중 멈췄어요. 열려 있는 알림 창이 있으면 닫고 다시 해 보세요.";
+            if (e is OutOfMemoryException)
+                return "파일이 너무 커서 처리하지 못했어요.";
+            return e.Message;
         }
 
         static void ToPdf(JobResult r, string f)
@@ -319,20 +370,22 @@ namespace Tuk
             r.Made.Add(outPath);
         }
 
-        static void Shrink(JobResult r, string f)
+        static bool Shrink(JobResult r, string f, int side, out long before, out long after)
         {
-            long before = new FileInfo(f).Length;
+            before = new FileInfo(f).Length;
             byte[] jpg;
-            using (var img = Pictures.LoadUpright(f)) jpg = Pictures.Jpeg(img, 1600, 80);
+            using (var img = Pictures.LoadUpright(f)) jpg = Pictures.Jpeg(img, side, 80);
+            after = jpg.Length;
             if (jpg.Length >= before)
             {
                 r.Notes.Add(Path.GetFileName(f) + "은(는) 이미 충분히 작아요.");
-                return;
+                return false;
             }
             string outPath = Paths.Beside(f, "_줄임", ".jpg");
             File.WriteAllBytes(outPath, jpg);
             r.Made.Add(outPath);
             r.Notes.Add(Path.GetFileName(f) + ": " + Paths.Size(before) + " → " + Paths.Size(jpg.Length));
+            return true;
         }
     }
 
@@ -368,7 +421,7 @@ namespace Tuk
         {
             Image img;
             using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (var src = Image.FromStream(fs))
+            using (var src = Open(fs))
             {
                 img = new Bitmap(src);
                 if (src.PropertyIdList.Contains(0x0112))
@@ -390,6 +443,13 @@ namespace Tuk
                 }
             }
             return img;
+        }
+
+        static Image Open(Stream s)
+        {
+            try { return Image.FromStream(s); }
+            catch (ArgumentException) { throw new Exception("그림 파일이 손상됐거나 읽을 수 없는 형식이에요."); }
+            catch (OutOfMemoryException) { throw new Exception("그림 파일이 손상됐거나 읽을 수 없는 형식이에요."); }
         }
 
         /// 흰 바탕 위에 다시 그려 JPEG로. maxSide 0이면 크기 그대로.
@@ -747,9 +807,34 @@ namespace Tuk
         public static readonly Color Paper = Color.FromArgb(246, 243, 238);
         public static readonly Color Ink = Color.FromArgb(40, 36, 32);
         public static readonly Color Accent = Color.FromArgb(232, 110, 60);
+        public static readonly Color Soft = Color.FromArgb(255, 236, 224);
         public static readonly Font Body = new Font("맑은 고딕", 10f);
         public static readonly Font Title = new Font("맑은 고딕", 13f, FontStyle.Bold);
         public static readonly Font Small = new Font("맑은 고딕", 8.5f);
+        public static readonly Font SmallBold = new Font("맑은 고딕", 8.5f, FontStyle.Bold);
+
+        [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+
+        /// 화면 배율(125%·150%)에서도 글자가 흐리지 않게. 창을 만들기 전에 부른다.
+        public static void UseSharpText()
+        {
+            try { SetProcessDPIAware(); } catch { }
+        }
+
+        static float scale;
+        /// 100% 화면 기준 픽셀을 지금 화면 배율에 맞춘다
+        public static int Px(int n)
+        {
+            if (scale == 0)
+            {
+                try { using (var g = Graphics.FromHwnd(IntPtr.Zero)) scale = g.DpiX / 96f; }
+                catch { scale = 1; }
+                if (scale < 1) scale = 1;
+            }
+            return (int)Math.Round(n * scale);
+        }
+        public static Point P(int x, int y) { return new Point(Px(x), Px(y)); }
+        public static Size S(int w, int h) { return new Size(Px(w), Px(h)); }
 
         public static ContextMenuStrip Menu(IList<string> files, Action<string> chosen)
         {
@@ -763,18 +848,41 @@ namespace Tuk
             {
                 var choice = c;
                 var item = new ToolStripMenuItem("&" + n + "  " + c.Label) { ToolTipText = c.Hint };
-                item.Click += delegate { chosen(choice.Id); };
+                if (c.Id == "shrink")
+                {
+                    // 크기 고르기: 숫자 키로도 고른다
+                    var sizes = new[]
+                    {
+                        new[] { "shrink-s", "&1  작게 · 1024픽셀", "메신저·알림장에 많이 올릴 때" },
+                        new[] { "shrink",   "&2  보통 · 1600픽셀", "메일·문서에 넣을 때" },
+                        new[] { "shrink-l", "&3  크게 · 2560픽셀", "인쇄하거나 크게 볼 때" },
+                    };
+                    foreach (var s in sizes)
+                    {
+                        var id = s[0];
+                        var sub = new ToolStripMenuItem(s[1]) { ToolTipText = s[2] };
+                        sub.Click += delegate { chosen(id); };
+                        item.DropDownItems.Add(sub);
+                    }
+                }
+                else item.Click += delegate { chosen(choice.Id); };
                 m.Items.Add(item);
                 n++;
             }
             return m;
         }
 
+        static string LabelOf(string id, IList<string> files)
+        {
+            if (id.StartsWith("shrink")) return "그림 용량 줄이기";
+            return Choices.For(files).Where(c => c.Id == id).Select(c => c.Label).FirstOrDefault() ?? id;
+        }
+
         /// 일을 STA 스레드(오피스 COM에 필요)에서 하고, 끝나면 알림을 띄운다.
         public static void RunWithToast(string id, IList<string> files, Action done)
         {
-            var label = Choices.For(files).Where(c => c.Id == id).Select(c => c.Label).FirstOrDefault() ?? id;
-            var busy = new Toast(label + " 하는 중…", "잠시만 기다려 주세요.", null, false);
+            var label = LabelOf(id, files);
+            var busy = Toast.Busy(label + " 하는 중…", files.Count > 1 ? "파일 " + files.Count + "개 · 잠시만 기다려 주세요." : "잠시만 기다려 주세요.");
             busy.Show();
             var ui = SynchronizationContext.Current;
             var t = new Thread(delegate ()
@@ -783,17 +891,7 @@ namespace Tuk
                 ui.Post(delegate
                 {
                     busy.Close();
-                    string title, body;
-                    if (r.Made.Count > 0 && r.Problems.Count == 0) title = "다 됐어요 · " + label;
-                    else if (r.Made.Count > 0) title = "일부만 됐어요 · " + label;
-                    else title = "하지 못했어요 · " + label;
-                    var lines = new List<string>();
-                    if (r.Made.Count == 1) lines.Add(Path.GetFileName(r.Made[0]));
-                    else if (r.Made.Count > 1) lines.Add(r.Made.Count + "개 만들었어요");
-                    lines.AddRange(r.Notes.Take(2));
-                    lines.AddRange(r.Problems.Take(2));
-                    body = string.Join("\n", lines);
-                    var toast = new Toast(title, body, r.Made.Count > 0 ? r.Made[0] : null, r.Made.Count == 0);
+                    var toast = Toast.For(label, r);
                     toast.FormClosed += delegate { if (done != null) done(); };
                     toast.Show();
                 }, null);
@@ -809,38 +907,99 @@ namespace Tuk
     {
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
 
-        public Toast(string title, string body, string reveal, bool bad)
+        public static Toast Busy(string title, string body)
+        {
+            return new Toast(title, body, null, null, false, true);
+        }
+
+        public static Toast For(string label, JobResult r)
+        {
+            string title;
+            bool bad = r.Problems.Count > 0;
+            if (r.Made.Count > 0 && !bad) title = "다 됐어요 · " + label;
+            else if (r.Made.Count > 0) title = "일부만 됐어요 · " + label;
+            else if (!bad) title = "바꿀 것이 없었어요 · " + label;
+            else title = "하지 못했어요 · " + label;
+
+            var lines = new List<string>();
+            if (r.Made.Count == 1) lines.Add(Path.GetFileName(r.Made[0]));
+            else if (r.Made.Count > 1) lines.Add(r.Made.Count + "개 만들었어요");
+            lines.AddRange(r.Problems.Take(3));
+            if (r.Problems.Count > 3) lines.Add("그 밖에 문제 " + (r.Problems.Count - 3) + "개");
+            lines.AddRange(r.Notes.Take(bad ? 1 : 3));
+
+            // 하나면 그 파일을 열고, 여럿이면 폴더를 연다
+            string open = r.Made.Count == 1 ? r.Made[0] : null;
+            string reveal = r.Made.Count > 0 ? r.Made[0] : null;
+            return new Toast(title, string.Join("\n", lines), open, reveal, bad && r.Made.Count == 0, false);
+        }
+
+        Toast(string title, string body, string open, string reveal, bool bad, bool busy)
         {
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
             BackColor = Ui.Paper;
-            Size = new Size(360, 120);
-            var wa = Screen.PrimaryScreen.WorkingArea;
-            Location = new Point(wa.Right - Width - 16, wa.Bottom - Height - 16);
-            Padding = new Padding(16);
 
-            var bar = new Panel { Dock = DockStyle.Left, Width = 6, BackColor = bad ? Color.IndianRed : Ui.Accent };
-            var t = new Label { Text = title, Font = Ui.Title, ForeColor = Ui.Ink, AutoSize = false, Location = new Point(22, 12), Size = new Size(320, 26) };
-            var b = new Label { Text = body, Font = Ui.Small, ForeColor = Ui.Ink, AutoSize = false, Location = new Point(22, 40), Size = new Size(320, 48) };
+            int w = Ui.Px(380), left = Ui.Px(22), inner = w - left - Ui.Px(18);
+            var bodySize = TextRenderer.MeasureText(body.Length == 0 ? " " : body, Ui.Small, new Size(inner, 0), TextFormatFlags.WordBreak);
+            int bodyH = Math.Min(bodySize.Height + Ui.Px(4), Ui.Px(140));
+
+            var bar = new Panel { Dock = DockStyle.Left, Width = Ui.Px(6), BackColor = bad ? Color.IndianRed : Ui.Accent };
+            var t = new Label { Text = title, Font = Ui.Title, ForeColor = Ui.Ink, AutoSize = false, AutoEllipsis = true, Location = new Point(left, Ui.Px(12)), Size = new Size(inner, Ui.Px(28)) };
+            var b = new Label { Text = body, Font = Ui.Small, ForeColor = Ui.Ink, AutoSize = false, AutoEllipsis = true, Location = new Point(left, Ui.Px(42)), Size = new Size(inner, bodyH) };
             Controls.Add(bar); Controls.Add(t); Controls.Add(b);
+            int y = Ui.Px(42) + bodyH + Ui.Px(6);
+
+            int x = left;
+            if (open != null)
+            {
+                var o = Link("열기", true, x, y);
+                o.LinkClicked += delegate
+                {
+                    try { Process.Start(new ProcessStartInfo(open) { UseShellExecute = true }); } catch { }
+                    Close();
+                };
+                x = o.Right + Ui.Px(18);
+            }
             if (reveal != null)
             {
-                var open = new LinkLabel { Text = "폴더에서 보기", Font = Ui.Small, AutoSize = true, Location = new Point(22, 92), LinkColor = Ui.Accent };
-                open.LinkClicked += delegate
+                var f = Link("폴더에서 보기", open == null, x, y);
+                f.LinkClicked += delegate
                 {
                     try { Process.Start("explorer.exe", "/select,\"" + reveal + "\""); } catch { }
                     Close();
                 };
-                Controls.Add(open);
             }
+            if (open != null || reveal != null) y += Ui.Px(24);
+            Size = new Size(w, y + Ui.Px(12));
+
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            Location = new Point(wa.Right - Width - Ui.Px(16), wa.Bottom - Height - Ui.Px(16));
+
             Click += delegate { Close(); };
             t.Click += delegate { Close(); };
             b.Click += delegate { Close(); };
-            timer.Interval = 7000;
-            timer.Tick += delegate { timer.Stop(); Close(); };
-            Shown += delegate { if (!title.EndsWith("…")) timer.Start(); };
+            // 문제가 있으면 더 오래 보여 주고, 마우스를 올리면 기다린다
+            timer.Interval = bad ? 15000 : 8000;
+            timer.Tick += delegate
+            {
+                if (Bounds.Contains(Cursor.Position)) return;
+                timer.Stop(); Close();
+            };
+            if (!busy) Shown += delegate { timer.Start(); };
+        }
+
+        LinkLabel Link(string text, bool strong, int x, int y)
+        {
+            var l = new LinkLabel
+            {
+                Text = text, Font = strong ? Ui.SmallBold : Ui.Small, AutoSize = true, Location = new Point(x, y),
+                LinkColor = Ui.Accent, ActiveLinkColor = Ui.Accent, LinkBehavior = LinkBehavior.HoverUnderline
+            };
+            Controls.Add(l);
+            return l;
         }
 
         protected override bool ShowWithoutActivation { get { return true; } }
@@ -888,8 +1047,12 @@ namespace Tuk
     {
         readonly Label hint;
         readonly Button installBtn;
+        readonly Label note;
         readonly LinkLabel update;
         Updater.Info found;
+
+        const string HintReady = "여기에 파일이나 폴더를 끌어다 놓으세요.\nPDF로 · 그림 용량 줄이기 · ZIP 묶기·풀기\n(복사한 파일은 Ctrl+V)";
+        const string HintFirst = "처음이면 아래 주황 단추부터 눌러요.\n탐색기에서 오른쪽 클릭 → 보내기 → 툭\n\n지금 바로 쓰려면 여기에 파일을 놓으세요.";
 
         void CheckUpdate(bool asked)
         {
@@ -951,23 +1114,24 @@ namespace Tuk
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(380, 284);
+            ClientSize = Ui.S(380, 296);
             BackColor = Ui.Paper;
             AllowDrop = true;
             TopMost = true;
+            KeyPreview = true;
 
-            var title = new Label { Text = "툭 놓으면 끝", Font = new Font("맑은 고딕", 18f, FontStyle.Bold), ForeColor = Ui.Ink, AutoSize = true, Location = new Point(24, 20) };
+            var title = new Label { Text = "툭 놓으면 끝", Font = new Font("맑은 고딕", 18f, FontStyle.Bold), ForeColor = Ui.Ink, AutoSize = true, Location = Ui.P(24, 20) };
             hint = new Label
             {
-                Text = "여기에 파일이나 폴더를 끌어다 놓으세요.\nPDF로 · 그림 용량 줄이기 · ZIP 묶기·풀기",
                 Font = Ui.Body, ForeColor = Ui.Ink, AutoSize = false, TextAlign = ContentAlignment.MiddleCenter,
-                Location = new Point(24, 70), Size = new Size(332, 110), BorderStyle = BorderStyle.FixedSingle, BackColor = Color.White
+                Location = Ui.P(24, 70), Size = Ui.S(332, 122), BorderStyle = BorderStyle.FixedSingle, BackColor = Color.White
             };
-            installBtn = new Button { Font = Ui.Body, Location = new Point(24, 196), Size = new Size(200, 36), FlatStyle = FlatStyle.System };
-            var note = new Label { Text = "결과는 원본 옆에\n새 파일로 생겨요", Font = Ui.Small, ForeColor = Color.Gray, AutoSize = true, Location = new Point(236, 198) };
-            update = new LinkLabel { Text = "새 버전 확인", Font = Ui.Small, AutoSize = true, Location = new Point(24, 252), LinkColor = Color.Gray };
-            var site = new LinkLabel { Text = "웹에서 쓰기 · 소개", Font = Ui.Small, AutoSize = true, Location = new Point(250, 252), LinkColor = Color.Gray };
+            installBtn = new Button { Font = Ui.Body, Location = Ui.P(24, 206), Size = Ui.S(200, 38), UseVisualStyleBackColor = false };
+            note = new Label { Text = "결과는 원본 옆에\n새 파일로 생겨요", Font = Ui.Small, ForeColor = Color.Gray, AutoSize = true, Location = Ui.P(236, 209) };
+            update = new LinkLabel { Text = "새 버전 확인", Font = Ui.Small, AutoSize = true, Location = Ui.P(24, 264), LinkColor = Color.Gray };
+            var site = new LinkLabel { Text = "웹에서 쓰기 · 소개", Font = Ui.Small, AutoSize = true, LinkColor = Color.Gray };
             Controls.Add(title); Controls.Add(hint); Controls.Add(installBtn); Controls.Add(note); Controls.Add(update); Controls.Add(site);
+            site.Location = new Point(ClientSize.Width - Ui.Px(24) - site.PreferredWidth, Ui.Px(264));
             RefreshInstall();
             installBtn.Click += delegate { ToggleInstall(); };
             update.LinkClicked += delegate { if (found != null) ApplyUpdate(); else CheckUpdate(true); };
@@ -978,27 +1142,52 @@ namespace Tuk
             DragEnter += delegate (object s, DragEventArgs e)
             {
                 e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
-                if (e.Effect != DragDropEffects.None) hint.BackColor = Color.FromArgb(255, 236, 224);
+                if (e.Effect != DragDropEffects.None) { hint.BackColor = Ui.Soft; hint.Text = "놓으면 할 일을 골라요"; }
             };
-            DragLeave += delegate { hint.BackColor = Color.White; };
+            DragLeave += delegate { RefreshInstall(); };
             DragDrop += delegate (object s, DragEventArgs e)
             {
-                hint.BackColor = Color.White;
+                RefreshInstall();
                 var dropped = e.Data.GetData(DataFormats.FileDrop) as string[];
                 if (dropped == null || dropped.Length == 0) return;
                 var list = dropped.ToList();
-                BeginInvoke(new Action(delegate
-                {
-                    Activate();
-                    var m = Ui.Menu(list, delegate (string id) { Ui.RunWithToast(id, list, null); });
-                    m.Show(Cursor.Position);
-                }));
+                BeginInvoke(new Action(delegate { Activate(); ShowMenu(list, Cursor.Position); }));
             };
+            KeyDown += delegate (object s, KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Escape) { Close(); return; }
+                if (e.Control && e.KeyCode == Keys.V)
+                {
+                    e.Handled = true;
+                    if (!Clipboard.ContainsFileDropList())
+                    {
+                        MessageBox.Show(this, "복사한 파일이 없어요. 탐색기에서 파일을 고르고 Ctrl+C를 누른 뒤 다시 해 보세요.", AppInfo.Name);
+                        return;
+                    }
+                    var list = Clipboard.GetFileDropList().Cast<string>().ToList();
+                    ShowMenu(list, hint.PointToScreen(new Point(hint.Width / 3, hint.Height / 2)));
+                }
+            };
+        }
+
+        void ShowMenu(List<string> list, Point at)
+        {
+            var m = Ui.Menu(list, delegate (string id) { Ui.RunWithToast(id, list, null); });
+            m.Show(at);
         }
 
         void RefreshInstall()
         {
-            installBtn.Text = Installer.Installed ? "보내기 메뉴에서 빼기" : "보내기 메뉴에 넣기";
+            bool installed = Installer.Installed;
+            installBtn.Text = installed ? "보내기 메뉴에서 빼기" : "보내기 메뉴에 넣기";
+            // 처음 쓸 때는 할 일을 눈에 띄게
+            installBtn.FlatStyle = installed ? FlatStyle.System : FlatStyle.Flat;
+            installBtn.BackColor = installed ? SystemColors.Control : Ui.Accent;
+            installBtn.ForeColor = installed ? SystemColors.ControlText : Color.White;
+            installBtn.Font = installed ? Ui.Body : new Font(Ui.Body, FontStyle.Bold);
+            installBtn.FlatAppearance.BorderSize = 0;
+            hint.Text = installed ? HintReady : HintFirst;
+            hint.BackColor = Color.White;
         }
 
         void ToggleInstall()
@@ -1018,7 +1207,7 @@ namespace Tuk
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "하지 못했어요: " + ex.Message, AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "하지 못했어요: " + Jobs.Friendly(ex), AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             RefreshInstall();
         }
