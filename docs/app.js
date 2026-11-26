@@ -19,6 +19,10 @@
   const SIZES = [[1024, '작게 · 1024픽셀'], [1600, '보통 · 1600픽셀'], [2560, '크게 · 2560픽셀']];
   let shrinkSide = 1600;
   try { const v = Number(localStorage.getItem('tuk.shrinkSide')); if (SIZES.some(([s]) => s === v)) shrinkSide = v; } catch (_) { /* 저장 못 해도 괜찮다 */ }
+  // 그림 → PDF 여백 (포인트): 보통 28(약 1cm) · 좁게 10 · 없음 0
+  const MARGINS = [[28, '여백 보통'], [10, '여백 좁게'], [0, '여백 없이']];
+  let pdfMargin = 28;
+  try { const v = localStorage.getItem('tuk.pdfMargin'); if (v !== null && MARGINS.some(([m]) => m === Number(v))) pdfMargin = Number(v); } catch (_) { /* 저장 못 해도 괜찮다 */ }
 
   const ext = (n) => (n.split('.').pop() || '').toLowerCase();
   const stem = (n) => { const b = n.split('/').pop(); const i = b.lastIndexOf('.'); return i > 0 ? b.slice(0, i) : b; };
@@ -112,6 +116,7 @@
     if (pdfs > 0) choices.push(['pages', pdfs > 1 ? '쪽 고르기·돌리기 (합쳐서)' : '쪽 빼기·돌리기·순서']);
     if (pdfs > 0) choices.push(['pagenum', '쪽 번호 넣기']);
     if (pdfs > 0) choices.push(['wm', '워터마크 넣기']);
+    if (pdfs > 0) choices.push(['squeeze', 'PDF 용량 줄이기 (스캔본)']);
     if (pdfs > 0) choices.push(['split', '쪽마다 나누기']);
     if (pdfs > 0) choices.push(['pdfjpg', 'PDF → JPG 그림']);
     if (imgs > 0) choices.push(['pdf', imgs > 1 ? '그림마다 PDF로' : 'PDF로']);
@@ -128,22 +133,10 @@
       b.textContent = label;
       b.addEventListener('click', () => run(id));
       if (id === 'shrink') {
-        // 단추와 크기 고르기를 한 덩어리로
-        const g = document.createElement('span');
-        g.className = 'pair';
-        const sel = document.createElement('select');
-        sel.setAttribute('aria-label', '줄일 크기');
-        for (const [s, label] of SIZES) {
-          const o = document.createElement('option');
-          o.value = String(s); o.textContent = label; o.selected = s === shrinkSide;
-          sel.appendChild(o);
-        }
-        sel.addEventListener('change', () => {
-          shrinkSide = Number(sel.value);
-          try { localStorage.setItem('tuk.shrinkSide', sel.value); } catch (_) { /* 무시 */ }
-        });
-        g.append(b, sel);
-        actionsEl.appendChild(g);
+        actionsEl.appendChild(pair(b, '줄일 크기', SIZES, shrinkSide, (v) => { shrinkSide = v; remember('shrinkSide', v); }));
+      } else if (id === 'pdf') {
+        // 여백은 'PDF로'와 'PDF 하나로 묶기'에 함께 쓴다
+        actionsEl.appendChild(pair(b, 'PDF 여백', MARGINS, pdfMargin, (v) => { pdfMargin = v; remember('pdfMargin', v); }));
       } else actionsEl.appendChild(b);
     });
 
@@ -159,6 +152,22 @@
       hintEl.innerHTML = '<span>' + notice.join(' ') + ' 윈도우 프로그램은 탐색기에서 바로 바꿔요.</span>' +
         '<a class="btn small primary" href="download/Tuk.zip" download>윈도우 프로그램 받기</a>';
     } else hintEl.hidden = true;
+  }
+
+  /** 단추와 고르기를 한 덩어리로 */
+  function pair(button, label, options, current, changed) {
+    const g = document.createElement('span');
+    g.className = 'pair';
+    const sel = document.createElement('select');
+    sel.setAttribute('aria-label', label);
+    for (const [v, text] of options) {
+      const o = document.createElement('option');
+      o.value = String(v); o.textContent = text; o.selected = v === current;
+      sel.appendChild(o);
+    }
+    sel.addEventListener('change', () => changed(Number(sel.value)));
+    g.append(button, sel);
+    return g;
   }
 
   function setStatus(text, bad) {
@@ -266,16 +275,25 @@
       read: (f) => ({ text: f.text.value.trim(), alpha: Number(f.alpha.value), diagonal: f.diagonal.value === '1' }),
       run: (files, o) => window.TukPdf.watermark(files, o, setStatus),
     },
+    squeeze: {
+      title: 'PDF 용량 줄이기 (스캔본)',
+      submit: '줄이기',
+      html:
+        '<label>화질 <select name="level"><option value="s">작게 · 100dpi</option><option value="m" selected>보통 · 150dpi</option><option value="l">선명하게 · 200dpi</option></select></label>' +
+        '<p class="opts-note">스캔한(그림으로 된) 쪽만 줄여요. 글자로 된 쪽은 그대로 둬서 글자 고르기·검색이 그대로 돼요.</p>',
+      read: (f) => ({ level: f.level.value }),
+      run: (files, o) => window.TukPdf.squeeze(files, { s: { dpi: 100, quality: 0.6 }, m: { dpi: 150, quality: 0.7 }, l: { dpi: 200, quality: 0.8 } }[o.level] || { dpi: 150, quality: 0.7 }, setStatus),
+    },
   };
   // 고른 값은 이 브라우저에만 기억한다
-  const remember = (k, v) => { try { localStorage.setItem('tuk.' + k, JSON.stringify(v)); } catch (_) { /* 무시 */ } };
+  function remember(k, v) { try { localStorage.setItem('tuk.' + k, JSON.stringify(v)); } catch (_) { /* 무시 */ } }
   const recall = (k) => { try { return JSON.parse(localStorage.getItem('tuk.' + k) || 'null'); } catch (_) { return null; } };
 
   function showOptions(id) {
     const def = FORMS[id];
     optsEl.hidden = false;
     optsEl.innerHTML = '<form class="opts-form"><b class="opts-title"></b><div class="opts-fields">' + def.html + '</div>' +
-      '<div class="bar"><button class="btn primary" type="submit">PDF ' + items.filter(isPdf).length + '개에 넣기</button>' +
+      '<div class="bar"><button class="btn primary" type="submit">PDF ' + items.filter(isPdf).length + '개' + (def.submit ? ' ' + def.submit : '에 넣기') + '</button>' +
       '<button class="btn small" type="button" data-act="close">닫기</button></div></form>';
     const form = optsEl.querySelector('form');
     optsEl.querySelector('.opts-title').textContent = def.title;
@@ -296,15 +314,19 @@
       busy = true;
       form.querySelectorAll('button').forEach((b) => (b.disabled = true));
       clearResults();
-      const problems = [];
+      const problems = [], notes = [];
       for (const it of items.filter(isPdf)) {
-        try { for (const r of await def.run([it.file], o)) addResult(r.name, r.blob); }
-        catch (err) { problems.push(why(err)); }
+        try {
+          for (const r of await def.run([it.file], o)) {
+            if (r.message) notes.push(r.message);
+            else addResult(r.name, r.blob, r.note);
+          }
+        } catch (err) { problems.push(why(err)); }
       }
       busy = false;
       form.querySelectorAll('button').forEach((b) => (b.disabled = false));
       const head = results.length ? (problems.length ? '일부만 됐어요. ' : '다 됐어요. ') + results.length + '개를 만들었어요.' : '만든 파일이 없어요.';
-      setStatus([head].concat(problems).join(' · '), problems.length > 0 && results.length === 0);
+      setStatus([head].concat(notes, problems).join(' · '), problems.length > 0 && results.length === 0);
       resultBar.hidden = results.length === 0;
       $('#zipAll').hidden = results.length < 2;
     });
@@ -467,7 +489,7 @@
 
   // ── PDF (그림마다 A4 한 쪽, 가로 그림은 가로 쪽) ──
   async function imagesToPdf(files, progress) {
-    const A4W = 595.28, A4H = 841.89, M = 28;
+    const A4W = 595.28, A4H = 841.89, M = pdfMargin;
     const enc = new TextEncoder();
     const parts = [];
     const off = {};

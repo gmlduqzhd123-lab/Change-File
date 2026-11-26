@@ -1,9 +1,9 @@
 {
-    "version":  "0.5.0",
+    "version":  "0.6.0",
     "url":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.exe",
-    "sha256":  "5aa3faa1a552bb1ff16359806d32baaf414628033a79abd0bd63274807a46f7d",
-    "notes":  "여러 파일을 바꿀 때 몇 번째인지 보여 주고 [취소]로 멈출 수 있어요. 웹 버전에서 PDF에 쪽 번호와 워터마크(한글 가능)를 넣을 수 있어요.",
+    "sha256":  "dd908cf0f4fbdaba1974e4e18ba554ef9e9ad678870b1df6df7c11bf97d2b941",
+    "notes":  "보내기 메뉴에서 고른 일이 끝나기 전에 멈추던 문제를 고쳤어요. PDF → JPG(윈도우), 그림 → PDF 여백 고르기, 스캔한 PDF 용량 줄이기(웹)가 생겼어요.",
     "zip":  "https://gmlduqzhd123-lab.github.io/Change-File/download/Tuk.zip",
-    "zipBytes":  28682,
+    "zipBytes":  31220,
     "date":  "2026-11-26"
 }

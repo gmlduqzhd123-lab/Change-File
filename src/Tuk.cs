@@ -15,13 +15,16 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Wic = System.Windows.Media.Imaging;
+using WinPdf = Windows.Data.Pdf;
+using WinAsync = Windows.Foundation;
+using WinStreams = Windows.Storage.Streams;
 
 namespace Tuk
 {
     static class AppInfo
     {
         public const string Name = "툭";
-        public const string Version = "0.5.0";
+        public const string Version = "0.6.0";
         public static string InstallDir
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Tuk"); }
@@ -273,7 +276,9 @@ namespace Tuk
             int heic = files.Count(f => Kinds.IsImage(f) && Kinds.IsHeic(f));
             if (heic > 0) list.Add(new MenuChoice("tojpg", "JPG로 바꾸기 (아이폰 사진)", "HEIC " + heic + "장을 어디서나 열리는 JPG로 · 크기 그대로"));
             if (img > 0) list.Add(new MenuChoice("shrink", "그림 용량 줄이기", "크기를 골라요 · JPG"));
-            if (files.Any(Kinds.IsPdfFile)) list.Add(new MenuChoice("pdfweb", "PDF 합치기·쪽 고르기 (웹)", "웹 버전을 열어요. 파일을 거기에 놓으면 돼요."));
+            int pdfs = files.Count(Kinds.IsPdfFile);
+            if (pdfs > 0) list.Add(new MenuChoice("pdfjpg", "PDF → JPG 그림", "쪽마다 JPG 한 장 · 여러 쪽이면 새 폴더에"));
+            if (pdfs > 0) list.Add(new MenuChoice("pdfweb", "PDF 합치기·쪽 고르기 (웹)", "쪽 번호·워터마크·스캔본 줄이기도 웹 버전에서 해요. 파일을 거기에 놓으면 돼요."));
             list.Add(new MenuChoice("zip", "ZIP으로 묶기", "고른 것을 압축 파일 하나로"));
             if (files.All(Kinds.IsZip)) list.Add(new MenuChoice("unzip", "압축 풀기", "새 폴더에 풀기"));
             return list;
@@ -321,8 +326,40 @@ namespace Tuk
             {
                 switch (id)
                 {
-                    case "pdf": each(files, delegate (string f) { ToPdf(r, f); }); break;
-                    case "pdfall": Safe(r, files[0], delegate { ImagesToOnePdf(r, files.Where(Kinds.IsImage).ToList()); }); break;
+                    case "pdf":
+                    case "pdf-n":
+                    case "pdf-0":
+                        each(files, delegate (string f) { ToPdf(r, f, MarginOf(id)); }); break;
+                    case "pdfall":
+                    case "pdfall-n":
+                    case "pdfall-0":
+                        Safe(r, files[0], delegate { ImagesToOnePdf(r, files.Where(Kinds.IsImage).ToList(), MarginOf(id)); }); break;
+                    case "pdfjpg":
+                        {
+                            var pdfs = files.Where(Kinds.IsPdfFile).ToList();
+                            for (int i = 0; i < pdfs.Count && !r.Cancelled; i++)
+                            {
+                                if (stop != null && stop())
+                                {
+                                    r.Notes.Insert(0, "취소했어요. " + (pdfs.Count - i) + "개는 하지 않았어요.");
+                                    r.Cancelled = true;
+                                    break;
+                                }
+                                var f = pdfs[i];
+                                int fi = i;
+                                string name = Path.GetFileName(f);
+                                Safe(r, f, delegate
+                                {
+                                    PdfPages.ToJpg(r, f, delegate (int p, int n)
+                                    {
+                                        if (progress == null) return;
+                                        if (pdfs.Count == 1) progress(p, n, name);
+                                        else progress(fi + 1, pdfs.Count, name + " · " + p + "/" + n + "쪽");
+                                    }, stop);
+                                });
+                            }
+                            break;
+                        }
                     case "shrink":
                     case "shrink-s":
                     case "shrink-l":
@@ -356,6 +393,12 @@ namespace Tuk
         public static int ShrinkSide(string id)
         {
             return id == "shrink-s" ? 1024 : id == "shrink-l" ? 2560 : 1600;
+        }
+
+        /// 그림 → PDF 여백(포인트): 보통 28(약 1cm) · 좁게 10 · 없음 0
+        public static double MarginOf(string id)
+        {
+            return id.EndsWith("-n") ? 10 : id.EndsWith("-0") ? 0 : 28;
         }
 
         static void Safe(JobResult r, string f, Action a)
@@ -393,19 +436,19 @@ namespace Tuk
             return e.Message;
         }
 
-        static void ToPdf(JobResult r, string f)
+        static void ToPdf(JobResult r, string f, double margin)
         {
             if (!Kinds.ToPdf(f)) { r.Notes.Add(Path.GetFileName(f) + "은(는) PDF로 바꿀 수 없어서 건너뛰었어요."); return; }
             string outPath = Paths.Beside(f, "", ".pdf");
-            if (Kinds.IsImage(f)) Pdf.FromImages(outPath, new List<string> { f });
+            if (Kinds.IsImage(f)) Pdf.FromImages(outPath, new List<string> { f }, margin);
             else Office.ToPdf(f, outPath);
             r.Made.Add(outPath);
         }
 
-        static void ImagesToOnePdf(JobResult r, List<string> imgs)
+        static void ImagesToOnePdf(JobResult r, List<string> imgs, double margin)
         {
             string outPath = Paths.Beside(imgs[0], "_묶음", ".pdf");
-            Pdf.FromImages(outPath, imgs);
+            Pdf.FromImages(outPath, imgs, margin);
             r.Made.Add(outPath);
         }
 
@@ -577,9 +620,9 @@ namespace Tuk
     // ───────────── PDF (그림 → PDF는 직접 쓴다) ─────────────
     static class Pdf
     {
-        const double A4W = 595.28, A4H = 841.89, Margin = 28;
+        const double A4W = 595.28, A4H = 841.89;
 
-        public static void FromImages(string outPath, IList<string> images)
+        public static void FromImages(string outPath, IList<string> images, double Margin)
         {
             string tmp = outPath + ".part";
             var offsets = new Dictionary<int, long>();
@@ -654,6 +697,109 @@ namespace Tuk
     }
 
     // ───────────── 한글·오피스 → PDF (PC에 깔린 프로그램을 COM으로 부른다) ─────────────
+    // ───────────── PDF → JPG (윈도우에 들어 있는 PDF 그리기 기능, Windows.Data.Pdf) ─────────────
+    static class PdfPages
+    {
+        const int Dpi = 150, MaxSide = 3000, MaxPages = 500;
+
+        // 윈도우 비동기 작업을 끝날 때까지 기다린다 (C# 5 기본 컴파일러에는 AsTask 도우미가 없다)
+        static T Wait<T>(WinAsync.IAsyncOperation<T> op)
+        {
+            while (op.Status == WinAsync.AsyncStatus.Started) Thread.Sleep(5);
+            if (op.Status != WinAsync.AsyncStatus.Completed) throw op.ErrorCode ?? new Exception("PDF를 읽지 못했어요.");
+            return op.GetResults();
+        }
+        static void Wait(WinAsync.IAsyncAction op)
+        {
+            while (op.Status == WinAsync.AsyncStatus.Started) Thread.Sleep(5);
+            if (op.Status != WinAsync.AsyncStatus.Completed) throw op.ErrorCode ?? new Exception("PDF 쪽을 그리지 못했어요.");
+        }
+
+        static WinPdf.PdfDocument Open(string path)
+        {
+            try
+            {
+                var file = Wait(Windows.Storage.StorageFile.GetFileFromPathAsync(Path.GetFullPath(path)));
+                return Wait(WinPdf.PdfDocument.LoadFromFileAsync(file));
+            }
+            catch (Exception ex)
+            {
+                if (Environment.GetEnvironmentVariable("TUK_DEBUG") == "1") Console.Error.WriteLine(ex.ToString());
+                if (ex is FileNotFoundException || ex is UnauthorizedAccessException) throw;
+                if ((ex.HResult & 0xFFFF) == 0x52B) throw new Exception("암호가 걸린 PDF라서 열 수 없어요.");
+                // AES-256 암호 등 윈도우 PDF 기능이 못 여는 방식
+                if (ex.HResult == unchecked((int)0x80048040)) throw new Exception("암호가 걸렸거나 윈도우가 읽지 못하는 방식의 PDF예요.");
+                throw new Exception("PDF가 손상됐거나 읽을 수 없어요.");
+            }
+        }
+
+        /// 쪽마다 JPG 한 장. 한 쪽이면 PDF 옆에, 여러 쪽이면 새 폴더에 넣는다.
+        public static void ToJpg(JobResult r, string path, Action<int, int> progress, Func<bool> stop)
+        {
+            var doc = Open(path);
+            int n = (int)doc.PageCount;
+            if (n == 0) throw new Exception("쪽이 없는 PDF예요.");
+            if (n > MaxPages) throw new Exception("쪽이 너무 많아요 (" + MaxPages + "쪽까지).");
+            string stem = Path.GetFileNameWithoutExtension(path);
+            string dir = null;
+            if (n > 1)
+            {
+                dir = Paths.Unique(Path.GetDirectoryName(Path.GetFullPath(path)), stem + "_그림", "");
+                Directory.CreateDirectory(dir);
+            }
+            int width = Math.Max(2, n.ToString(CultureInfo.InvariantCulture).Length);
+            for (int i = 0; i < n; i++)
+            {
+                if (stop != null && stop())
+                {
+                    r.Notes.Insert(0, "취소했어요. " + Path.GetFileName(path) + "은(는) " + i + "쪽까지만 바꿨어요.");
+                    r.Cancelled = true;
+                    break;
+                }
+                if (progress != null) progress(i + 1, n);
+                byte[] jpg = Page(doc, (uint)i);
+                string outPath = dir == null
+                    ? Paths.Beside(path, "", ".jpg")
+                    : Path.Combine(dir, stem + "_" + (i + 1).ToString("D" + width, CultureInfo.InvariantCulture) + "쪽.jpg");
+                File.WriteAllBytes(outPath, jpg);
+                if (dir == null) r.Made.Add(outPath);
+            }
+            if (dir != null)
+            {
+                if (Directory.EnumerateFiles(dir).Any()) r.Made.Add(dir);
+                else Directory.Delete(dir);
+            }
+        }
+
+        static byte[] Page(WinPdf.PdfDocument doc, uint index)
+        {
+            using (var page = doc.GetPage(index))
+            {
+                // page.Size는 1/96인치 단위, 돌려 둔 쪽은 돌린 뒤 크기
+                double w = page.Size.Width, h = page.Size.Height;
+                double scale = Math.Min(Dpi / 96.0, MaxSide / Math.Max(w, h));
+                var o = new WinPdf.PdfPageRenderOptions
+                {
+                    DestinationWidth = (uint)Math.Max(1, Math.Round(w * scale)),
+                    DestinationHeight = (uint)Math.Max(1, Math.Round(h * scale)),
+                };
+                using (var st = new WinStreams.InMemoryRandomAccessStream())
+                {
+                    Wait(page.RenderToStreamAsync(st, o));
+                    var buf = new byte[st.Size];
+                    using (var rd = new WinStreams.DataReader(st.GetInputStreamAt(0)))
+                    {
+                        Wait(rd.LoadAsync((uint)st.Size));
+                        rd.ReadBytes(buf);
+                    }
+                    using (var ms = new MemoryStream(buf))
+                    using (var img = Image.FromStream(ms))
+                        return Pictures.Jpeg(img, 0, 90);
+                }
+            }
+        }
+    }
+
     static class Office
     {
         public static void ToPdf(string src, string outPath)
@@ -956,6 +1102,24 @@ namespace Tuk
                         item.DropDownItems.Add(sub);
                     }
                 }
+                else if ((c.Id == "pdf" && files.Where(Kinds.ToPdf).All(Kinds.IsImage)) || c.Id == "pdfall")
+                {
+                    // 그림 → PDF 여백 고르기. 위 항목을 바로 누르면 '보통'.
+                    var margins = new[]
+                    {
+                        new[] { "",   "&1  여백 보통", "A4에 1cm쯤 여백 · 인쇄하기 좋아요" },
+                        new[] { "-n", "&2  여백 좁게", "그림을 조금 더 크게" },
+                        new[] { "-0", "&3  여백 없이", "A4 가득 · 남는 쪽만 흰 띠" },
+                    };
+                    foreach (var s in margins)
+                    {
+                        var id = c.Id + s[0];
+                        var sub = new ToolStripMenuItem(s[1]) { ToolTipText = s[2] };
+                        sub.Click += delegate { chosen(id); };
+                        item.DropDownItems.Add(sub);
+                    }
+                    item.Click += delegate { chosen(choice.Id); m.Close(); };
+                }
                 else if (c.Id == "pdfweb")
                 {
                     // PDF 손질은 웹 버전에서 한다. 파일이 있는 폴더도 같이 열어 끌어다 놓기 쉽게.
@@ -975,6 +1139,8 @@ namespace Tuk
         static string LabelOf(string id, IList<string> files)
         {
             if (id.StartsWith("shrink")) return "그림 용량 줄이기";
+            if (id.StartsWith("pdfall")) id = "pdfall";
+            else if (id.StartsWith("pdf-")) id = "pdf";
             return Choices.For(files).Where(c => c.Id == id).Select(c => c.Label).FirstOrDefault() ?? id;
         }
 
@@ -984,7 +1150,7 @@ namespace Tuk
             var label = LabelOf(id, files);
             int stop = 0;
             var busy = Toast.Busy(label + " 하는 중…", files.Count > 1 ? "파일 " + files.Count + "개 · 잠시만 기다려 주세요." : "잠시만 기다려 주세요.",
-                files.Count > 1 ? (Action)delegate { Interlocked.Exchange(ref stop, 1); } : null);
+                files.Count > 1 || id == "pdfjpg" ? (Action)delegate { Interlocked.Exchange(ref stop, 1); } : null);
             busy.Show();
             var ui = SynchronizationContext.Current;
             var t = new Thread(delegate ()
@@ -1162,7 +1328,14 @@ namespace Tuk
                 picked = true;
                 Ui.RunWithToast(id, files, delegate { Close(); });
             });
-            m.Closed += delegate { if (!picked) BeginInvoke(new Action(Close)); };
+            // 메뉴는 항목의 Click보다 먼저 닫힌다. 바로 창을 닫으면 프로그램이 끝나 일하던 스레드도 같이 멈추므로,
+            // 잠깐 기다렸다가 아무것도 고르지 않았을 때만 닫는다.
+            m.Closed += delegate
+            {
+                var wait = new System.Windows.Forms.Timer { Interval = 400 };
+                wait.Tick += delegate { wait.Stop(); wait.Dispose(); if (!picked) Close(); };
+                wait.Start();
+            };
             m.Show(Cursor.Position);
         }
     }

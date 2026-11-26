@@ -13,8 +13,13 @@ New-Item -ItemType Directory -Force $out | Out-Null
 
 $refs = 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll',
         'Microsoft.CSharp.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll',
-        'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll', 'System.Xaml.dll' |
+        'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll', 'System.Xaml.dll',
+        'System.Runtime.dll', 'System.Runtime.WindowsRuntime.dll' |
         ForEach-Object { "/reference:" + (Join-Path $fw $_) }
+# PDF → JPG: 윈도우 10·11에 들어 있는 PDF 그리기 기능(Windows.Data.Pdf)
+$winmd = Join-Path $env:WINDIR 'System32\WinMetadata'
+$refs += 'Windows.Foundation.winmd', 'Windows.Storage.winmd', 'Windows.Data.winmd' |
+        ForEach-Object { "/reference:" + (Join-Path $winmd $_) }
 
 $src = Join-Path $root 'src\Tuk.cs'
 $exe = Join-Path $out 'Tuk.exe'

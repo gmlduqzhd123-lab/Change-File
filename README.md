@@ -8,8 +8,10 @@
 
 | 할 일 | 웹 | 윈도우 |
 |---|---|---|
-| 그림 → PDF (하나로 묶기 포함) | ✓ | ✓ |
-| PDF 합치기 · 쪽 빼기·돌리기·순서 바꾸기 · 쪽 번호 · 워터마크 · 쪽마다 나누기 · PDF → JPG | ✓ | 메뉴에서 웹 버전을 열어 줌 |
+| 그림 → PDF (하나로 묶기 포함, 여백 보통·좁게·없이) | ✓ | ✓ |
+| PDF → JPG (150dpi) | ✓ (pdf.js) | ✓ (윈도우에 들어 있는 Windows.Data.Pdf) |
+| PDF 합치기 · 쪽 빼기·돌리기·순서 바꾸기 · 쪽 번호 · 워터마크 · 쪽마다 나누기 | ✓ | 메뉴에서 웹 버전을 열어 줌 |
+| 스캔한 PDF 용량 줄이기 (글자 없는 쪽만 다시 그림) | ✓ | 메뉴에서 웹 버전을 열어 줌 |
 | 아이폰 사진(HEIC) → JPG | 사파리만 | ✓ (HEIF·HEVC 확장 필요, WIC로 읽음) |
 | 한글(HWP·HWPX)·워드·엑셀·PPT → PDF | | ✓ (한컴오피스·MS 오피스 필요) |
 | 그림 용량 줄이기 (긴 쪽 1024·1600·2560px 중 골라 JPG) | ✓ | ✓ |
@@ -23,7 +25,7 @@ build.ps1         빌드·배포 스크립트
 docs/             GitHub Pages 사이트
   index.html      소개 + 웹 버전
   app.js          웹 버전 코드 (JSZip 3.10.1을 cdnjs에서 불러옴)
-  pdftools.js     PDF 합치기·쪽 고르기 (PDF를 놓았을 때만 pdf-lib 1.17.1, pdf.js 3.11.174를 cdnjs에서 불러옴, SRI 확인)
+  pdftools.js     PDF 합치기·쪽 고르기·나누기·JPG·쪽 번호·워터마크·스캔본 줄이기 (PDF를 놓았을 때만 pdf-lib 1.17.1, pdf.js 3.11.174를 cdnjs에서 불러옴, SRI 확인)
   version.json    윈도우 프로그램 새 버전 정보
   download/       Tuk.zip(받기 단추), Tuk.exe(앱 안 업데이트)
 ```

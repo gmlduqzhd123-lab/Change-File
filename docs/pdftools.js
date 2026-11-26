@@ -139,6 +139,65 @@
     return out;
   }
 
+  /**
+   * 스캔한 PDF 용량 줄이기: 글자가 없는(그림뿐인) 쪽만 낮은 해상도 JPG로 다시 그린다.
+   * 글자가 있는 쪽은 그대로 옮겨서 글자 고르기·검색이 그대로 된다.
+   * @param {{dpi: number, quality: number}} o
+   * 돌려주는 값: [{name, blob, note}] 또는 [{message}] (줄일 것이 없을 때)
+   */
+  async function squeeze(files, o, status) {
+    await Promise.all([needPdfLib(), needPdfJs()]);
+    const { PDFDocument } = window.PDFLib;
+    const out = [];
+    for (const f of [...files].sort(byName)) {
+      const src = await openPdf(f);
+      let view;
+      try { view = await window.pdfjsLib.getDocument({ data: src.bytes.slice(), isEvalSupported: false }).promise; }
+      catch (e) { throw new Error(f.name + ': PDF가 손상됐거나 읽을 수 없어요'); }
+      try {
+        const n = view.numPages;
+        if (n > MAX_PAGES) throw new Error(f.name + ': 쪽이 너무 많아요 (' + MAX_PAGES + '쪽까지)');
+        const doc = await PDFDocument.create();
+        let scanned = 0;
+        for (let i = 1; i <= n; i++) {
+          status(f.name + ' 줄이는 중… ' + i + '/' + n);
+          const page = await view.getPage(i);
+          const text = await page.getTextContent();
+          const hasText = text.items.some((t) => t.str && t.str.trim());
+          if (hasText) {
+            const [copy] = await doc.copyPages(src.doc, [i - 1]);
+            doc.addPage(copy);
+          } else {
+            // 보이는 방향 그대로 그린 그림을 같은 크기 쪽에 깐다 (돌림 정보는 그림에 반영됨)
+            const vp1 = page.getViewport({ scale: 1 });
+            const scale = Math.min(o.dpi / 72, 4000 / Math.max(vp1.width, vp1.height));
+            const vp = page.getViewport({ scale });
+            const c = document.createElement('canvas');
+            c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+            const g = c.getContext('2d');
+            g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+            await page.render({ canvasContext: g, viewport: vp }).promise;
+            const jpg = await new Promise((res) => c.toBlob(res, 'image/jpeg', o.quality));
+            c.width = c.height = 0;
+            const img = await doc.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
+            const p = doc.addPage([vp1.width, vp1.height]);
+            p.drawImage(img, { x: 0, y: 0, width: vp1.width, height: vp1.height });
+            scanned++;
+          }
+          page.cleanup();
+        }
+        if (scanned === 0) { out.push({ message: f.name + '은(는) 글자로 된 PDF라 줄일 그림 쪽이 없어요' }); continue; }
+        const bytes = await doc.save();
+        if (bytes.length >= f.size * 0.95) { out.push({ message: f.name + '은(는) 이미 충분히 작아요' }); continue; }
+        const note = size(f.size) + ' → ' + size(bytes.length) + (scanned < n ? ' · 그림 쪽 ' + scanned + '/' + n : '');
+        out.push({ name: stem(f.name) + '_줄임.pdf', blob: new Blob([bytes], { type: 'application/pdf' }), note });
+      } finally { view.destroy(); }
+    }
+    return out;
+  }
+
+  const size = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(b / 1024)) + 'KB');
+
   // ── 쪽 위에 그리기 (쪽 번호·워터마크) ──
   // 돌려 둔 쪽(/Rotate)도 '보이는 방향' 기준으로 그린다.
   // 보이는 좌표(vx, vy: 왼쪽 아래가 0)를 PDF 좌표로 바꾼다.
@@ -395,5 +454,5 @@
     return { close };
   }
 
-  window.TukPdf = { merge, edit, split, toJpg, pageNumbers, watermark };
+  window.TukPdf = { merge, edit, split, toJpg, pageNumbers, watermark, squeeze };
 })();
