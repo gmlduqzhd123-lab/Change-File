@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" data-qr-url="https://gmlduqzhd123-lab.github.io/Change-File/" data-qr-name="툭">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -11,6 +11,17 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-title" content="툭">
+<meta property="og:type" content="website">
+<meta property="og:title" content="툭 — 툭 놓으면 끝">
+<meta property="og:description" content="파일을 툭 놓으면 PDF 변환·합치기, 그림 용량 줄이기, ZIP 묶기·풀기. 파일은 내 기기 밖으로 나가지 않아요.">
+<meta property="og:url" content="https://gmlduqzhd123-lab.github.io/Change-File/">
+<meta property="og:image" content="https://gmlduqzhd123-lab.github.io/Change-File/og-image.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://gmlduqzhd123-lab.github.io/Change-File/og-image.jpg">
+<script defer src="ys-install.js"></script>
+<script defer src="ys-qr.js"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23E86E3C'/%3E%3Ctext x='16' y='23' font-size='18' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%ED%88%AD%3C/text%3E%3C/svg%3E">
 <style>
 :root {
@@ -224,6 +235,13 @@ kbd { font: inherit; font-size: .9em; padding: 1px 7px; border: 1px solid var(--
 .faq details p { margin: 8px 0 0 calc(1em + 10px); color: var(--muted); }
 footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+/* 엽쌤 공통: 설치·QR 버튼, 하단 문구 */
+header.top .ys-btn { margin-left: 0; }
+.ys-credit { margin-top: 6px; font-size: 13px; color: var(--muted); }
+.ys-credit a { color: inherit; }
+html.app header.top .ys-btn { margin-left: 0; }
+@media (max-width: 560px) { .ys-wide { display: none; } header.top .wrap { gap: 8px; } header.top .ys-btn { padding: 0 9px; } }
+@media (max-width: 420px) { nav.links a[href="#windows"] { display: none; } }
 </style>
 </head>
 <body>
@@ -237,6 +255,8 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
       <a href="#faq">질문</a>
       <a href="#safe">안심</a>
     </nav>
+    <button class="theme ys-btn" type="button" data-ys-install>📲 <span class="ys-wide">앱 </span>설치</button>
+    <button class="theme ys-btn" type="button" data-qr aria-label="QR 코드로 접속">📱 QR</button>
     <button class="theme" id="themeBtn" type="button">화면: 자동</button>
   </div>
 </header>
@@ -403,6 +423,7 @@ footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; border-top:
     <span id="showAllWrap" hidden><a href="#" id="showAll">툭 소개·윈도우 프로그램 보기</a> · </span>
     <a href="selftest.html">이 기기에서 잘 되는지 점검</a> ·
     <a href="https://github.com/gmlduqzhd123-lab/Change-File/issues/new" rel="noopener">불편한 점 알리기</a></div>
+  <p class="wrap ys-credit">© 2026 엽쌤. All rights reserved. · <a href="https://gmlduqzhd123-lab.github.io/YScode/">엽쌤의 다른 앱 보기 →</a></p>
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" referrerpolicy="no-referrer"></script>

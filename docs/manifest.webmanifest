@@ -3,7 +3,7 @@
   "short_name": "툭",
   "description": "PDF 만들기·합치기·쪽 고르기, 그림 용량 줄이기, ZIP 묶기·풀기. 파일은 내 기기 안에서만.",
   "lang": "ko",
-  "id": "./",
+  "id": "/Change-File/",
   "start_url": "./?app=1",
   "scope": "./",
   "display": "standalone",
