@@ -2,13 +2,13 @@
 // 파일은 어디로도 보내지 않는다. 다른 앱에서 '공유'로 받은 파일도 이 기기 안에만 잠깐 둔다.
 'use strict';
 
-const VERSION = 'tuk-2.5.0';
+const VERSION = 'tuk-2.5.1';
 const SHELL = VERSION + '-shell';
 const LIBS = 'tuk-libs';          // 버전이 주소에 박힌 라이브러리 — 바뀌지 않으니 계속 쓴다
 const SHARE = 'tuk-share';        // 공유로 받은 파일을 화면이 꺼낼 때까지만 둔다
 
 const BASE = new URL('./', self.location).href;
-const PAGES = ['./', 'app.js', 'pdftools.js', 'crop.js', 'selftest.html', 'selftest-sample.heic', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
+const PAGES = ['./', 'app.js', 'pdftools.js', 'crop.js', 'selftest.html', 'selftest-sample.heic', 'manifest.webmanifest', 'ys-install.js', 'ys-qr.js', 'qr.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 const CDN = [
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
@@ -32,7 +32,7 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    for (const k of await caches.keys()) if (k.endsWith('-shell') && k !== SHELL) await caches.delete(k);
+    for (const k of await caches.keys()) if (k.startsWith('tuk-') && k.endsWith('-shell') && k !== SHELL) await caches.delete(k);
     await self.clients.claim();
   })());
 });
